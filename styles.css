@@ -313,9 +313,43 @@ button.icon-button {
     backdrop-filter: none;
 }
 
+.deck-area .deck-name {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translateY(calc(-100% - 0.4rem));
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: rgba(15, 23, 42, 0.85);
+    color: #e2e8f0;
+    padding: 0.25rem 0.6rem;
+    border-radius: 0.6rem;
+    letter-spacing: 0.01em;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35);
+}
+
+.deck-area.locked {
+    border-style: dashed;
+    cursor: default;
+}
+
+.deck-area.locked .resize-handle {
+    display: none;
+}
+
+.deck-area.name-hidden .deck-name {
+    display: none;
+}
+
 .deck-area:active {
     cursor: grabbing;
     box-shadow: none;
+}
+
+.deck-area.locked:active {
+    cursor: default;
 }
 
 .deck-area .resize-handle {
