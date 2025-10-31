@@ -100,6 +100,7 @@ function addHistoryEntry(label) {
 function createItemElement({ width, height, label, color, type = 'item' }) {
     const element = document.createElement('div');
     element.className = type;
+    element.dataset.type = type;
     element.dataset.x = '0';
     element.dataset.y = '0';
     element.dataset.rotation = '0';
@@ -109,11 +110,20 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.style.height = `${height}px`;
     if (type === 'item') {
         element.style.background = color;
+        element.textContent = label || 'New item';
     } else {
         element.style.background = '#ffffff';
         element.style.color = '#0f172a';
+        const deckLabel = label || 'Deck area';
+        element.dataset.nameHidden = 'false';
+        element.dataset.label = deckLabel;
+        const nameEl = document.createElement('div');
+        nameEl.className = 'deck-name';
+        nameEl.textContent = deckLabel;
+        element.appendChild(nameEl);
+        setDeckLockState(element, false);
+        element.classList.remove('name-hidden');
     }
-    element.textContent = label || (type === 'item' ? 'New item' : 'Deck area');
 
     const resizeHandle = document.createElement('div');
     resizeHandle.className = 'resize-handle';
@@ -135,6 +145,17 @@ function setupItemInteractions(element, resizeHandle) {
     let start = {};
 
     element.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) {
+            return;
+        }
+
+        const isDeckArea = element.dataset.type === 'deck-area';
+        const isLockedDeck = isDeckArea && element.dataset.locked === 'true';
+
+        if (isLockedDeck) {
+            return;
+        }
+
         if (event.target === resizeHandle) {
             action = 'resize';
         } else {
@@ -228,6 +249,27 @@ function closeSettingsMenu() {
 }
 
 function openContextMenu(x, y) {
+    if (!activeItem) return;
+
+    contextMenu.innerHTML = '';
+    const actions = getContextMenuActions(activeItem);
+    if (!actions.length) {
+        closeContextMenu();
+        return;
+    }
+
+    actions.forEach(({ action, label, className }) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.action = action;
+        button.textContent = label;
+        button.setAttribute('role', 'menuitem');
+        if (className) {
+            button.classList.add(className);
+        }
+        contextMenu.appendChild(button);
+    });
+
     contextMenu.style.transform = `translate(${x}px, ${y}px)`;
     contextMenu.classList.add('open');
 }
@@ -239,19 +281,87 @@ function closeContextMenu() {
 
 function handleContextAction(action) {
     if (!activeItem) return;
-    if (action === 'delete') {
-        activeItem.remove();
-        addHistoryEntry('Item deleted');
-    } else if (action === 'rotate-left') {
-        const current = parseFloat(activeItem.dataset.rotation) || 0;
-        activeItem.dataset.rotation = (current - 15).toString();
-        updateElementTransform(activeItem);
-    } else if (action === 'rotate-right') {
-        const current = parseFloat(activeItem.dataset.rotation) || 0;
-        activeItem.dataset.rotation = (current + 15).toString();
-        updateElementTransform(activeItem);
+    const type = activeItem.dataset.type;
+    if (type === 'deck-area') {
+        const deckLabel = activeItem.dataset.label || 'Deck';
+        const labelSuffix = deckLabel ? `: ${deckLabel}` : '';
+        if (action === 'lock-deck') {
+            setDeckLockState(activeItem, true);
+            addHistoryEntry(`Deck locked${labelSuffix}`);
+        } else if (action === 'unlock-deck') {
+            setDeckLockState(activeItem, false);
+            addHistoryEntry(`Deck unlocked${labelSuffix}`);
+        } else if (action === 'rename-deck') {
+            renameDeckArea(activeItem);
+        } else if (action === 'toggle-deck-name') {
+            toggleDeckNameVisibility(activeItem);
+        }
+    } else {
+        if (action === 'delete') {
+            activeItem.remove();
+            addHistoryEntry('Item deleted');
+        } else if (action === 'rotate-left') {
+            const current = parseFloat(activeItem.dataset.rotation) || 0;
+            activeItem.dataset.rotation = (current - 15).toString();
+            updateElementTransform(activeItem);
+        } else if (action === 'rotate-right') {
+            const current = parseFloat(activeItem.dataset.rotation) || 0;
+            activeItem.dataset.rotation = (current + 15).toString();
+            updateElementTransform(activeItem);
+        }
     }
     closeContextMenu();
+}
+
+function getContextMenuActions(element) {
+    if (!element) return [];
+    const type = element.dataset.type;
+    if (type === 'deck-area') {
+        const locked = element.dataset.locked === 'true';
+        const nameHidden = element.dataset.nameHidden === 'true';
+        return [
+            { action: locked ? 'unlock-deck' : 'lock-deck', label: locked ? 'Unlock deck' : 'Lock deck' },
+            { action: 'rename-deck', label: 'Rename deck' },
+            { action: 'toggle-deck-name', label: nameHidden ? 'Show name' : 'Hide name' },
+        ];
+    }
+    return [
+        { action: 'rotate-left', label: 'Rotate -15°' },
+        { action: 'rotate-right', label: 'Rotate +15°' },
+        { action: 'delete', label: 'Delete', className: 'danger' },
+    ];
+}
+
+function setDeckLockState(element, locked) {
+    element.dataset.locked = locked ? 'true' : 'false';
+    element.classList.toggle('locked', locked);
+}
+
+function renameDeckArea(element) {
+    const current = element.dataset.label || '';
+    const name = prompt('Rename deck', current);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === current) return;
+    element.dataset.label = trimmed;
+    const nameEl = element.querySelector('.deck-name');
+    if (nameEl) {
+        nameEl.textContent = trimmed;
+    }
+    addHistoryEntry(`Deck renamed: ${trimmed}`);
+}
+
+function toggleDeckNameVisibility(element) {
+    const shouldHide = element.dataset.nameHidden !== 'true';
+    element.dataset.nameHidden = shouldHide ? 'true' : 'false';
+    element.classList.toggle('name-hidden', shouldHide);
+    const nameEl = element.querySelector('.deck-name');
+    if (nameEl) {
+        nameEl.style.display = shouldHide ? 'none' : '';
+    }
+    const deckLabel = element.dataset.label || 'Deck';
+    const labelSuffix = deckLabel ? `: ${deckLabel}` : '';
+    addHistoryEntry(shouldHide ? `Deck name hidden${labelSuffix}` : `Deck name shown${labelSuffix}`);
 }
 
 function handleAddDeckArea() {
@@ -373,8 +483,10 @@ contextMenu.addEventListener('click', (event) => {
     handleContextAction(button.dataset.action);
 });
 
-document.addEventListener('contextmenu', () => {
-    closeContextMenu();
+document.addEventListener('contextmenu', (event) => {
+    if (!event.target.closest('.item, .deck-area, #context-menu')) {
+        closeContextMenu();
+    }
 });
 
 createItemBtn.addEventListener('click', handleCreateItem);
