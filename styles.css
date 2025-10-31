@@ -324,7 +324,7 @@ button.icon-button {
 }
 
 .item {
-    border-radius: 16px;
+    border-radius: 0;
     box-shadow: 0 12px 30px rgba(15, 23, 42, 0.4);
     z-index: 1;
 }
@@ -387,6 +387,15 @@ button.icon-button {
     background: rgba(15, 23, 42, 0.35);
 }
 
+.item.locked {
+    cursor: default;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+}
+
+.item.locked .resize-handle {
+    display: none;
+}
+
 .resize-handle {
     position: absolute;
     width: 16px;
@@ -397,6 +406,14 @@ button.icon-button {
     right: 8px;
     cursor: nwse-resize;
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.4);
+}
+
+.item .resize-handle {
+    cursor: grab;
+}
+
+.item .resize-handle:active {
+    cursor: grabbing;
 }
 
 .menu {

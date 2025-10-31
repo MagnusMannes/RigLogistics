@@ -124,6 +124,8 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.dataset.rotation = '0';
     element.dataset.width = width.toString();
     element.dataset.height = height.toString();
+    element.dataset.locked = 'false';
+    element.dataset.comment = '';
     element.style.width = `${metersToPixels(width)}px`;
     element.style.height = `${metersToPixels(height)}px`;
     if (type === 'item') {
@@ -169,12 +171,15 @@ function setupItemInteractions(element, resizeHandle) {
 
         const isDeckArea = element.dataset.type === 'deck-area';
         const isLockedDeck = isDeckArea && element.dataset.locked === 'true';
+        const isLockedItem = !isDeckArea && element.dataset.locked === 'true';
 
-        if (isLockedDeck) {
+        if (isLockedDeck || isLockedItem) {
             return;
         }
 
-        if (event.target === resizeHandle) {
+        if (!isDeckArea && event.target === resizeHandle) {
+            action = 'rotate';
+        } else if (event.target === resizeHandle) {
             action = 'resize';
         } else {
             action = 'move';
@@ -188,7 +193,14 @@ function setupItemInteractions(element, resizeHandle) {
             elemY: parseFloat(element.dataset.y),
             width: parseFloat(element.dataset.width),
             height: parseFloat(element.dataset.height),
+            rotation: parseFloat(element.dataset.rotation) || 0,
         };
+        if (action === 'rotate') {
+            const rect = element.getBoundingClientRect();
+            start.centerX = rect.left + rect.width / 2;
+            start.centerY = rect.top + rect.height / 2;
+            start.pointerAngle = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
+        }
         activeItem = element;
     });
 
@@ -209,6 +221,11 @@ function setupItemInteractions(element, resizeHandle) {
             element.dataset.height = newHeight.toString();
             element.style.width = `${metersToPixels(newWidth)}px`;
             element.style.height = `${metersToPixels(newHeight)}px`;
+        } else if (action === 'rotate') {
+            const pointerAngle = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
+            const deltaAngle = (pointerAngle - start.pointerAngle) * (180 / Math.PI);
+            const newRotation = start.rotation + deltaAngle;
+            element.dataset.rotation = newRotation.toFixed(2);
         }
         updateElementTransform(element);
     });
@@ -242,6 +259,79 @@ function updateElementTransform(element) {
     const y = parseFloat(element.dataset.y);
     const rotation = parseFloat(element.dataset.rotation);
     element.style.transform = `translate(${x}px, ${y}px) rotate(${rotation}deg)`;
+}
+
+function getItemHistoryLabel(element) {
+    const label = element.textContent.trim();
+    return label ? `: ${label}` : '';
+}
+
+function rotateItemBy(element, degrees) {
+    const current = parseFloat(element.dataset.rotation) || 0;
+    const updated = current + degrees;
+    element.dataset.rotation = updated.toFixed(2);
+    updateElementTransform(element);
+    const formattedDegrees = degrees > 0 ? `+${degrees}` : `${degrees}`;
+    addHistoryEntry(`Item rotated ${formattedDegrees}°${getItemHistoryLabel(element)}`);
+}
+
+function setItemLockState(element, locked) {
+    element.dataset.locked = locked ? 'true' : 'false';
+    element.classList.toggle('locked', locked);
+    addHistoryEntry(`Item ${locked ? 'locked' : 'unlocked'}${getItemHistoryLabel(element)}`);
+}
+
+function promptResizeItem(element) {
+    const currentWidth = parseFloat(element.dataset.width);
+    const currentHeight = parseFloat(element.dataset.height);
+    const input = prompt(
+        'Enter new size in meters (width,height)',
+        `${currentWidth.toFixed(2)}, ${currentHeight.toFixed(2)}`
+    );
+    if (input === null) {
+        return;
+    }
+    const parts = input
+        .split(/[x×,]/)
+        .map((part) => parseFloat(part.trim()))
+        .filter((value) => Number.isFinite(value));
+    if (parts.length < 2) {
+        alert('Please provide both width and height separated by a comma (e.g. 4, 3).');
+        return;
+    }
+    const [rawWidth, rawHeight] = parts;
+    const width = clampToMinSize(rawWidth);
+    const height = clampToMinSize(rawHeight);
+    element.dataset.width = width.toString();
+    element.dataset.height = height.toString();
+    element.style.width = `${metersToPixels(width)}px`;
+    element.style.height = `${metersToPixels(height)}px`;
+    addHistoryEntry(
+        `Item resized to ${width.toFixed(2)}m × ${height.toFixed(2)}m${getItemHistoryLabel(element)}`
+    );
+    updateElementTransform(element);
+}
+
+function promptItemComment(element) {
+    const currentComment = element.dataset.comment || '';
+    const comment = prompt('Add or edit a comment for this item', currentComment);
+    if (comment === null) {
+        return;
+    }
+    const trimmed = comment.trim();
+    element.dataset.comment = trimmed;
+    const hadComment = Boolean(currentComment.trim());
+    if (trimmed) {
+        element.setAttribute('data-comment', trimmed);
+        element.setAttribute('title', trimmed);
+        addHistoryEntry(
+            `${hadComment ? 'Comment updated' : 'Comment added'}${getItemHistoryLabel(element)}`
+        );
+    } else {
+        element.removeAttribute('data-comment');
+        element.removeAttribute('title');
+        addHistoryEntry(`Comment cleared${getItemHistoryLabel(element)}`);
+    }
 }
 
 function handleCreateItem() {
@@ -320,16 +410,25 @@ function handleContextAction(action) {
         }
     } else {
         if (action === 'delete') {
+            const labelSuffix = getItemHistoryLabel(activeItem);
             activeItem.remove();
-            addHistoryEntry('Item deleted');
+            addHistoryEntry(`Item deleted${labelSuffix}`);
         } else if (action === 'rotate-left') {
-            const current = parseFloat(activeItem.dataset.rotation) || 0;
-            activeItem.dataset.rotation = (current - 15).toString();
-            updateElementTransform(activeItem);
+            rotateItemBy(activeItem, -15);
         } else if (action === 'rotate-right') {
-            const current = parseFloat(activeItem.dataset.rotation) || 0;
-            activeItem.dataset.rotation = (current + 15).toString();
-            updateElementTransform(activeItem);
+            rotateItemBy(activeItem, 15);
+        } else if (action === 'rotate-left-fine') {
+            rotateItemBy(activeItem, -1);
+        } else if (action === 'rotate-right-fine') {
+            rotateItemBy(activeItem, 1);
+        } else if (action === 'resize') {
+            promptResizeItem(activeItem);
+        } else if (action === 'lock-item') {
+            setItemLockState(activeItem, true);
+        } else if (action === 'unlock-item') {
+            setItemLockState(activeItem, false);
+        } else if (action === 'comment') {
+            promptItemComment(activeItem);
         }
     }
     closeContextMenu();
@@ -347,11 +446,20 @@ function getContextMenuActions(element) {
             { action: 'toggle-deck-name', label: nameHidden ? 'Show name' : 'Hide name' },
         ];
     }
-    return [
-        { action: 'rotate-left', label: 'Rotate -15°' },
-        { action: 'rotate-right', label: 'Rotate +15°' },
-        { action: 'delete', label: 'Delete', className: 'danger' },
-    ];
+    const locked = element.dataset.locked === 'true';
+    const hasComment = Boolean((element.dataset.comment || '').trim());
+    const actions = [];
+    if (!locked) {
+        actions.push({ action: 'rotate-left-fine', label: 'Rotate -1°' });
+        actions.push({ action: 'rotate-right-fine', label: 'Rotate +1°' });
+        actions.push({ action: 'rotate-left', label: 'Rotate -15°' });
+        actions.push({ action: 'rotate-right', label: 'Rotate +15°' });
+        actions.push({ action: 'resize', label: 'Resize…' });
+    }
+    actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
+    actions.push({ action: 'comment', label: hasComment ? 'Edit comment' : 'Add comment' });
+    actions.push({ action: 'delete', label: 'Delete', className: 'danger' });
+    return actions;
 }
 
 function setDeckLockState(element, locked) {
