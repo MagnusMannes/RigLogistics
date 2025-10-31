@@ -3,6 +3,7 @@ const selectedDeckKey = 'riglogistics:selectedDeck';
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
 const PIXELS_PER_METER = 60;
 const BASE_SCALE = 0.4;
+const MIN_SCALE = BASE_SCALE * 0.25;
 const MIN_ITEM_SIZE_METERS = 0.5;
 const DEFAULT_ITEM_WIDTH_METERS = 5;
 const DEFAULT_ITEM_HEIGHT_METERS = 3;
@@ -565,7 +566,7 @@ function setupWorkspaceInteractions() {
     workspaceContainer.addEventListener('wheel', (event) => {
         event.preventDefault();
         const scaleDelta = event.deltaY < 0 ? 1.1 : 0.9;
-        const newScale = Math.min(2.5, Math.max(0.4, workspaceState.scale * scaleDelta));
+        const newScale = Math.min(2.5, Math.max(MIN_SCALE, workspaceState.scale * scaleDelta));
 
         const rect = workspaceContainer.getBoundingClientRect();
         const cursorX = event.clientX - rect.left;
