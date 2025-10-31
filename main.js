@@ -1,6 +1,11 @@
 const decksKey = 'riglogistics:decks';
 const selectedDeckKey = 'riglogistics:selectedDeck';
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
+const PIXELS_PER_METER = 60;
+const MIN_ITEM_SIZE_METERS = 0.5;
+const DEFAULT_ITEM_WIDTH_METERS = 5;
+const DEFAULT_ITEM_HEIGHT_METERS = 3;
+const DEFAULT_DECK_AREA_SIZE_METERS = Number((320 / PIXELS_PER_METER).toFixed(2));
 
 const deckSelectionView = document.getElementById('deck-selection');
 const workspaceView = document.getElementById('workspace-view');
@@ -24,10 +29,23 @@ const inputHeight = document.getElementById('input-height');
 const inputLabel = document.getElementById('input-label');
 const inputColor = document.getElementById('input-color');
 
+inputWidth.value = DEFAULT_ITEM_WIDTH_METERS.toString();
+inputHeight.value = DEFAULT_ITEM_HEIGHT_METERS.toString();
+inputWidth.min = inputHeight.min = MIN_ITEM_SIZE_METERS.toString();
+inputWidth.step = inputHeight.step = '0.1';
+
 let decks = loadDecks();
 let currentDeck = null;
 let history = [];
 let activeItem = null;
+
+function metersToPixels(value) {
+    return value * PIXELS_PER_METER;
+}
+
+function clampToMinSize(value) {
+    return Math.max(MIN_ITEM_SIZE_METERS, value);
+}
 
 const workspaceState = {
     scale: 1,
@@ -106,8 +124,8 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.dataset.rotation = '0';
     element.dataset.width = width.toString();
     element.dataset.height = height.toString();
-    element.style.width = `${width}px`;
-    element.style.height = `${height}px`;
+    element.style.width = `${metersToPixels(width)}px`;
+    element.style.height = `${metersToPixels(height)}px`;
     if (type === 'item') {
         element.style.background = color;
         element.textContent = label || 'New item';
@@ -185,12 +203,12 @@ function setupItemInteractions(element, resizeHandle) {
             element.dataset.x = newX;
             element.dataset.y = newY;
         } else if (action === 'resize') {
-            const newWidth = Math.max(40, start.width + deltaX);
-            const newHeight = Math.max(40, start.height + deltaY);
-            element.dataset.width = newWidth;
-            element.dataset.height = newHeight;
-            element.style.width = `${newWidth}px`;
-            element.style.height = `${newHeight}px`;
+            const newWidth = clampToMinSize(start.width + deltaX / PIXELS_PER_METER);
+            const newHeight = clampToMinSize(start.height + deltaY / PIXELS_PER_METER);
+            element.dataset.width = newWidth.toString();
+            element.dataset.height = newHeight.toString();
+            element.style.width = `${metersToPixels(newWidth)}px`;
+            element.style.height = `${metersToPixels(newHeight)}px`;
         }
         updateElementTransform(element);
     });
@@ -227,12 +245,16 @@ function updateElementTransform(element) {
 }
 
 function handleCreateItem() {
-    const width = parseInt(inputWidth.value, 10) || 120;
-    const height = parseInt(inputHeight.value, 10) || 120;
+    const rawWidth = parseFloat(inputWidth.value);
+    const rawHeight = parseFloat(inputHeight.value);
+    const width = clampToMinSize(Number.isFinite(rawWidth) ? rawWidth : DEFAULT_ITEM_WIDTH_METERS);
+    const height = clampToMinSize(Number.isFinite(rawHeight) ? rawHeight : DEFAULT_ITEM_HEIGHT_METERS);
     const label = inputLabel.value.trim();
     const color = inputColor.value;
 
     createItemElement({ width, height, label, color, type: 'item' });
+    inputWidth.value = width.toFixed(2);
+    inputHeight.value = height.toFixed(2);
     inputLabel.value = '';
 }
 
@@ -365,7 +387,7 @@ function toggleDeckNameVisibility(element) {
 }
 
 function handleAddDeckArea() {
-    const size = 320;
+    const size = DEFAULT_DECK_AREA_SIZE_METERS;
     createItemElement({
         width: size,
         height: size,
