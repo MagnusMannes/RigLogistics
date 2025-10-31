@@ -107,7 +107,12 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.dataset.height = height.toString();
     element.style.width = `${width}px`;
     element.style.height = `${height}px`;
-    element.style.background = type === 'item' ? color : 'rgba(14, 165, 233, 0.18)';
+    if (type === 'item') {
+        element.style.background = color;
+    } else {
+        element.style.background = '#ffffff';
+        element.style.color = '#0f172a';
+    }
     element.textContent = label || (type === 'item' ? 'New item' : 'Deck area');
 
     const resizeHandle = document.createElement('div');
@@ -115,7 +120,11 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.appendChild(resizeHandle);
 
     setupItemInteractions(element, resizeHandle);
-    workspaceContent.appendChild(element);
+    if (type === 'deck-area') {
+        workspaceContent.insertBefore(element, workspaceContent.firstChild);
+    } else {
+        workspaceContent.appendChild(element);
+    }
     addHistoryEntry(`${type === 'item' ? 'Item' : 'Deck'} created${label ? `: ${label}` : ''}`);
     return element;
 }
@@ -246,11 +255,12 @@ function handleContextAction(action) {
 }
 
 function handleAddDeckArea() {
+    const size = 320;
     createItemElement({
-        width: 400,
-        height: 300,
+        width: size,
+        height: size,
         label: `${currentDeck || 'Deck'} area`,
-        color: 'rgba(14, 165, 233, 0.18)',
+        color: '#ffffff',
         type: 'deck-area',
     });
     closeSettingsMenu();
