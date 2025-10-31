@@ -17,6 +17,9 @@ const backButton = document.getElementById('back-button');
 const historySidebar = document.getElementById('history-sidebar');
 const toggleSidebarBtn = document.getElementById('toggle-sidebar');
 const historyList = document.getElementById('history-list');
+const historySearchInput = document.getElementById('history-search');
+const sortAlphaBtn = document.getElementById('sort-alpha');
+const sortDateBtn = document.getElementById('sort-date');
 const workspaceContainer = document.getElementById('workspace-container');
 const workspaceContent = document.getElementById('workspace-content');
 const createItemBtn = document.getElementById('create-item');
@@ -43,6 +46,8 @@ let activeItem = null;
 const itemMetadata = new Map();
 const itemHistories = new Map();
 let itemIdCounter = 0;
+let historySortMode = 'alpha';
+let historySearchQuery = '';
 
 function metersToPixels(value) {
     return value * PIXELS_PER_METER;
@@ -208,18 +213,48 @@ function removeItemRecord(element) {
     refreshItemList();
 }
 
+function updateSortButtons() {
+    if (!sortAlphaBtn || !sortDateBtn) {
+        return;
+    }
+    sortAlphaBtn.classList.toggle('active', historySortMode !== 'date');
+    sortDateBtn.classList.toggle('active', historySortMode === 'date');
+}
+
 function refreshItemList() {
     if (!historyList) return;
+    updateSortButtons();
     historyList.innerHTML = '';
-    const items = Array.from(itemMetadata.values());
+    let items = Array.from(itemMetadata.values());
+
+    const normalizedQuery = historySearchQuery.trim().toLowerCase();
+    if (normalizedQuery) {
+        items = items.filter((item) => {
+            const label = (item.label || '').toLowerCase();
+            const comment = (item.comment || '').toLowerCase();
+            const deck = (item.deck || '').toLowerCase();
+            return label.includes(normalizedQuery) || comment.includes(normalizedQuery) || deck.includes(normalizedQuery);
+        });
+    }
+
     if (!items.length) {
         const empty = document.createElement('li');
         empty.className = 'list-empty';
-        empty.textContent = 'No items yet.';
+        empty.textContent = normalizedQuery ? 'No items match your search.' : 'No items yet.';
         historyList.appendChild(empty);
         return;
     }
-    items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+
+    if (historySortMode === 'date') {
+        items.sort((a, b) => {
+            const timeA = new Date(a.lastModified).getTime();
+            const timeB = new Date(b.lastModified).getTime();
+            return timeB - timeA;
+        });
+    } else {
+        items.sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, { sensitivity: 'base' }));
+    }
+
     items.forEach((item) => {
         const li = document.createElement('li');
         li.className = 'item-summary';
@@ -835,6 +870,19 @@ function handleGlobalPointerDown() {
     closeContextMenu();
 }
 
+function setHistorySortMode(mode) {
+    if (mode !== 'alpha' && mode !== 'date') {
+        return;
+    }
+    if (historySortMode === mode) {
+        updateSortButtons();
+        return;
+    }
+    historySortMode = mode;
+    updateSortButtons();
+    refreshItemList();
+}
+
 settingsButton.addEventListener('click', (event) => {
     event.stopPropagation();
     settingsMenu.classList.toggle('open');
@@ -869,6 +917,25 @@ createItemBtn.addEventListener('click', handleCreateItem);
 toggleSidebarBtn.addEventListener('click', toggleSidebar);
 createDeckBtn.addEventListener('click', handleCreateDeck);
 backButton.addEventListener('click', goBackToSelection);
+
+if (historySearchInput) {
+    historySearchInput.addEventListener('input', (event) => {
+        historySearchQuery = event.target.value || '';
+        refreshItemList();
+    });
+}
+
+if (sortAlphaBtn) {
+    sortAlphaBtn.addEventListener('click', () => {
+        setHistorySortMode('alpha');
+    });
+}
+
+if (sortDateBtn) {
+    sortDateBtn.addEventListener('click', () => {
+        setHistorySortMode('date');
+    });
+}
 
 historyList.addEventListener('click', (event) => {
     const button = event.target.closest('.item-history-button');
