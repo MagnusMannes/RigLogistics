@@ -64,6 +64,16 @@
             <div class="workspace-body">
                 <aside id="history-sidebar" class="sidebar">
                     <h2>Item overview</h2>
+                    <div class="list-controls">
+                        <label class="search-field" for="history-search">
+                            <span class="visually-hidden">Search items</span>
+                            <input type="search" id="history-search" placeholder="Search items" />
+                        </label>
+                        <div class="sort-buttons" role="group" aria-label="Sort items">
+                            <button id="sort-alpha" class="ghost sort-button active" type="button">A → Z</button>
+                            <button id="sort-date" class="ghost sort-button" type="button">Recent</button>
+                        </div>
+                    </div>
                     <ul id="history-list"></ul>
                 </aside>
 
