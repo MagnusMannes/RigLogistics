@@ -282,7 +282,6 @@ button.icon-button {
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.15);
     color: #fff;
     font-weight: 600;
@@ -290,27 +289,33 @@ button.icon-button {
     padding: 0.5rem;
     cursor: grab;
     user-select: none;
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.4);
     transition: box-shadow 0.2s ease;
 }
 
-.item:active,
-.deck-area:active {
-    cursor: grabbing;
-    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.55);
+.item {
+    border-radius: 16px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.4);
+    z-index: 1;
 }
 
-.item {
-    z-index: 1;
+.item:active {
+    cursor: grabbing;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.55);
 }
 
 .deck-area {
     background: #fff;
     color: #0f172a;
     border: 1px solid rgba(15, 23, 42, 0.12);
-    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+    border-radius: 0;
+    box-shadow: none;
     z-index: 0;
     backdrop-filter: none;
+}
+
+.deck-area:active {
+    cursor: grabbing;
+    box-shadow: none;
 }
 
 .deck-area .resize-handle {
