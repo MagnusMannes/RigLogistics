@@ -413,14 +413,6 @@ function handleContextAction(action) {
             const labelSuffix = getItemHistoryLabel(activeItem);
             activeItem.remove();
             addHistoryEntry(`Item deleted${labelSuffix}`);
-        } else if (action === 'rotate-left') {
-            rotateItemBy(activeItem, -15);
-        } else if (action === 'rotate-right') {
-            rotateItemBy(activeItem, 15);
-        } else if (action === 'rotate-left-fine') {
-            rotateItemBy(activeItem, -1);
-        } else if (action === 'rotate-right-fine') {
-            rotateItemBy(activeItem, 1);
         } else if (action === 'resize') {
             promptResizeItem(activeItem);
         } else if (action === 'lock-item') {
@@ -450,10 +442,6 @@ function getContextMenuActions(element) {
     const hasComment = Boolean((element.dataset.comment || '').trim());
     const actions = [];
     if (!locked) {
-        actions.push({ action: 'rotate-left-fine', label: 'Rotate -1°' });
-        actions.push({ action: 'rotate-right-fine', label: 'Rotate +1°' });
-        actions.push({ action: 'rotate-left', label: 'Rotate -15°' });
-        actions.push({ action: 'rotate-right', label: 'Rotate +15°' });
         actions.push({ action: 'resize', label: 'Resize…' });
     }
     actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
@@ -533,7 +521,14 @@ function setupWorkspaceInteractions() {
     let panStart = { x: 0, y: 0, translateX: 0, translateY: 0 };
 
     workspaceContainer.addEventListener('pointerdown', (event) => {
-        if (event.target !== workspaceContainer && event.target !== workspaceContent) {
+        if (event.button !== 0) {
+            return;
+        }
+
+        const lockedElement = event.target.closest('.item.locked, .deck-area.locked');
+        const isWorkspaceSurface = event.target === workspaceContainer || event.target === workspaceContent;
+
+        if (!isWorkspaceSurface && !lockedElement) {
             return;
         }
         isPanning = true;
