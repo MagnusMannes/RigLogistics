@@ -28,11 +28,22 @@ const settingsMenu = document.getElementById('settings-menu');
 const addDeckAreaBtn = document.getElementById('add-deck-area');
 const contextMenu = document.getElementById('context-menu');
 const zoomValueEl = document.getElementById('zoom-value');
+const measureButton = document.getElementById('measure-button');
+const measurementInstructions = document.getElementById('measurement-instructions');
 
 const inputWidth = document.getElementById('input-width');
 const inputHeight = document.getElementById('input-height');
 const inputLabel = document.getElementById('input-label');
 const inputColor = document.getElementById('input-color');
+
+const measurementOverlay = document.createElement('div');
+measurementOverlay.id = 'measurement-overlay';
+measurementOverlay.className = 'measurement-overlay';
+workspaceContent.appendChild(measurementOverlay);
+
+if (measureButton) {
+    measureButton.setAttribute('aria-pressed', 'false');
+}
 
 inputWidth.value = DEFAULT_ITEM_WIDTH_METERS.toString();
 inputHeight.value = DEFAULT_ITEM_HEIGHT_METERS.toString();
@@ -48,6 +59,10 @@ const itemHistories = new Map();
 let itemIdCounter = 0;
 let historySortMode = 'alpha';
 let historySearchQuery = '';
+const measurementState = {
+    active: false,
+    points: [],
+};
 
 function metersToPixels(value) {
     return value * PIXELS_PER_METER;
@@ -55,6 +70,146 @@ function metersToPixels(value) {
 
 function clampToMinSize(value) {
     return Math.max(MIN_ITEM_SIZE_METERS, value);
+}
+
+function clearMeasurements() {
+    measurementState.points = [];
+    measurementOverlay.innerHTML = '';
+}
+
+function ensureMeasurementOverlay() {
+    if (!measurementOverlay.isConnected) {
+        workspaceContent.appendChild(measurementOverlay);
+    }
+}
+
+function getWorkspacePointFromEvent(event) {
+    const rect = workspaceContainer.getBoundingClientRect();
+    const x = (event.clientX - rect.left - workspaceState.translateX) / workspaceState.scale;
+    const y = (event.clientY - rect.top - workspaceState.translateY) / workspaceState.scale;
+    return { x, y };
+}
+
+function formatMeasurementLabel(lengthPixels) {
+    const meters = lengthPixels / PIXELS_PER_METER;
+    return `${meters.toFixed(2)} Meter`;
+}
+
+function addMeasurementPoint(point) {
+    measurementState.points.push(point);
+
+    const pointEl = document.createElement('div');
+    pointEl.className = 'measurement-point';
+    pointEl.style.left = `${point.x}px`;
+    pointEl.style.top = `${point.y}px`;
+    measurementOverlay.appendChild(pointEl);
+
+    if (measurementState.points.length < 2) {
+        return;
+    }
+
+    const previousPoint = measurementState.points[measurementState.points.length - 2];
+    const dx = point.x - previousPoint.x;
+    const dy = point.y - previousPoint.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+    const lineEl = document.createElement('div');
+    lineEl.className = 'measurement-line';
+    lineEl.style.left = `${previousPoint.x}px`;
+    lineEl.style.top = `${previousPoint.y}px`;
+    lineEl.style.width = `${length}px`;
+    lineEl.style.transform = `rotate(${angle}deg)`;
+    measurementOverlay.appendChild(lineEl);
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'measurement-label';
+    labelEl.textContent = formatMeasurementLabel(length);
+
+    const midX = previousPoint.x + dx / 2;
+    const midY = previousPoint.y + dy / 2;
+    if (length > 0) {
+        const offset = 14;
+        const offsetX = (-dy / length) * offset;
+        const offsetY = (dx / length) * offset;
+        labelEl.style.left = `${midX + offsetX}px`;
+        labelEl.style.top = `${midY + offsetY}px`;
+    } else {
+        labelEl.style.left = `${midX}px`;
+        labelEl.style.top = `${midY}px`;
+    }
+    measurementOverlay.appendChild(labelEl);
+}
+
+function activateMeasureMode() {
+    if (measurementState.active) {
+        return;
+    }
+    measurementState.active = true;
+    ensureMeasurementOverlay();
+    clearMeasurements();
+    if (measureButton) {
+        measureButton.classList.add('active');
+        measureButton.setAttribute('aria-pressed', 'true');
+    }
+    workspaceContainer.classList.add('measure-mode');
+    if (measurementInstructions) {
+        measurementInstructions.hidden = false;
+        measurementInstructions.classList.add('visible');
+    }
+    closeContextMenu();
+    document.addEventListener('keydown', handleMeasureKeydown);
+}
+
+function deactivateMeasureMode() {
+    if (!measurementState.active) {
+        return;
+    }
+    measurementState.active = false;
+    if (measureButton) {
+        measureButton.classList.remove('active');
+        measureButton.setAttribute('aria-pressed', 'false');
+    }
+    workspaceContainer.classList.remove('measure-mode');
+    if (measurementInstructions) {
+        measurementInstructions.classList.remove('visible');
+        measurementInstructions.hidden = true;
+    }
+    document.removeEventListener('keydown', handleMeasureKeydown);
+    clearMeasurements();
+}
+
+function toggleMeasureMode() {
+    if (measurementState.active) {
+        deactivateMeasureMode();
+    } else {
+        activateMeasureMode();
+    }
+}
+
+function handleMeasurePointerDown(event) {
+    if (!measurementState.active) {
+        return;
+    }
+    if (event.button !== 0) {
+        return;
+    }
+    if ('isPrimary' in event && !event.isPrimary) {
+        return;
+    }
+    if (!workspaceContainer.contains(event.target)) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getWorkspacePointFromEvent(event);
+    addMeasurementPoint(point);
+}
+
+function handleMeasureKeydown(event) {
+    if (event.key === 'Escape') {
+        deactivateMeasureMode();
+    }
 }
 
 const workspaceState = {
@@ -329,11 +484,14 @@ function renderDeckList() {
 
 function selectDeck(deck) {
     currentDeck = deck;
+    deactivateMeasureMode();
     localStorage.setItem(selectedDeckKey, deck);
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
     history = [];
     workspaceContent.innerHTML = '';
+    ensureMeasurementOverlay();
+    clearMeasurements();
     itemMetadata.clear();
     itemHistories.clear();
     refreshItemList();
@@ -344,6 +502,7 @@ function selectDeck(deck) {
 
 function goBackToSelection() {
     currentDeck = null;
+    deactivateMeasureMode();
     localStorage.removeItem(selectedDeckKey);
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
@@ -912,6 +1071,14 @@ document.addEventListener('contextmenu', (event) => {
         closeContextMenu();
     }
 });
+
+if (measureButton) {
+    measureButton.addEventListener('click', () => {
+        toggleMeasureMode();
+    });
+}
+
+workspaceContainer.addEventListener('pointerdown', handleMeasurePointerDown, true);
 
 createItemBtn.addEventListener('click', handleCreateItem);
 toggleSidebarBtn.addEventListener('click', toggleSidebar);

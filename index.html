@@ -47,6 +47,7 @@
                             Color
                             <input type="color" id="input-color" value="#3a7afe" />
                         </label>
+                        <button id="measure-button" class="ghost measure-toggle" type="button">Measure</button>
                         <button id="create-item" class="primary">Create item</button>
                     </div>
                 </div>
@@ -79,6 +80,14 @@
 
                 <div id="workspace-container" class="workspace-container">
                     <div id="workspace-content" class="workspace-content"></div>
+                    <div
+                        id="measurement-instructions"
+                        class="measure-instructions"
+                        aria-live="polite"
+                        hidden
+                    >
+                        Press escape or measure button again to stop measure mode
+                    </div>
                 </div>
             </div>
         </section>
