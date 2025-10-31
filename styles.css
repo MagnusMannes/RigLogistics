@@ -466,10 +466,18 @@ button.icon-button {
     top: 0;
     left: 0;
     transform: translate(-1000px, -1000px);
+    min-width: unset;
+    width: max-content;
+    max-width: 220px;
+    padding: 0.5rem;
 }
 
 .context-menu.open {
     display: flex;
+}
+
+.context-menu button {
+    white-space: nowrap;
 }
 
 .zoom-indicator {
