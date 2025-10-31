@@ -2,6 +2,7 @@ const decksKey = 'riglogistics:decks';
 const selectedDeckKey = 'riglogistics:selectedDeck';
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
 const PIXELS_PER_METER = 60;
+const BASE_SCALE = 0.4;
 const MIN_ITEM_SIZE_METERS = 0.5;
 const DEFAULT_ITEM_WIDTH_METERS = 5;
 const DEFAULT_ITEM_HEIGHT_METERS = 3;
@@ -48,7 +49,7 @@ function clampToMinSize(value) {
 }
 
 const workspaceState = {
-    scale: 1,
+    scale: BASE_SCALE,
     translateX: -workspaceContent.offsetWidth / 2,
     translateY: -workspaceContent.offsetHeight / 2,
 };
@@ -91,6 +92,7 @@ function selectDeck(deck) {
     history = [];
     historyList.innerHTML = '';
     workspaceContent.innerHTML = '';
+    workspaceState.scale = BASE_SCALE;
     applyWorkspaceTransform();
     closeSettingsMenu();
 }
@@ -104,7 +106,8 @@ function goBackToSelection() {
 
 function applyWorkspaceTransform() {
     workspaceContent.style.transform = `translate(${workspaceState.translateX}px, ${workspaceState.translateY}px) scale(${workspaceState.scale})`;
-    zoomValueEl.textContent = `${Math.round(workspaceState.scale * 100)}%`;
+    const normalizedScale = (workspaceState.scale / BASE_SCALE) * 100;
+    zoomValueEl.textContent = `${Math.round(normalizedScale)}%`;
 }
 
 function addHistoryEntry(label) {
