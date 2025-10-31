@@ -324,7 +324,7 @@ button.icon-button {
 }
 
 .item {
-    border-radius: 0;
+    border-radius: 16px;
     box-shadow: 0 12px 30px rgba(15, 23, 42, 0.4);
     z-index: 1;
 }
@@ -332,16 +332,6 @@ button.icon-button {
 .item:active {
     cursor: grabbing;
     box-shadow: 0 20px 45px rgba(15, 23, 42, 0.55);
-}
-
-.item.locked {
-    opacity: 0.75;
-    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.3);
-    cursor: default;
-}
-
-.item.locked:active {
-    cursor: default;
 }
 
 .deck-area {
@@ -407,26 +397,6 @@ button.icon-button {
     right: 8px;
     cursor: nwse-resize;
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.4);
-}
-
-.rotate-handle {
-    position: absolute;
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.9);
-    bottom: 8px;
-    right: 8px;
-    cursor: grab;
-    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.4);
-}
-
-.rotate-handle:active {
-    cursor: grabbing;
-}
-
-.item.locked .rotate-handle {
-    display: none;
 }
 
 .menu {
