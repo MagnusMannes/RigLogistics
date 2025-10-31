@@ -40,6 +40,9 @@ let decks = loadDecks();
 let currentDeck = null;
 let history = [];
 let activeItem = null;
+const itemMetadata = new Map();
+const itemHistories = new Map();
+let itemIdCounter = 0;
 
 function metersToPixels(value) {
     return value * PIXELS_PER_METER;
@@ -54,6 +57,210 @@ const workspaceState = {
     translateX: -workspaceContent.offsetWidth / 2,
     translateY: -workspaceContent.offsetHeight / 2,
 };
+
+function generateItemId() {
+    itemIdCounter += 1;
+    return `item-${Date.now()}-${itemIdCounter}`;
+}
+
+function formatTimestamp(value) {
+    if (!value) {
+        return '—';
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+    return date.toLocaleString();
+}
+
+function getItemLabel(element) {
+    if (!element) return 'Unnamed item';
+    const label = (element.textContent || '').trim();
+    return label || 'Unnamed item';
+}
+
+function getElementRect(element) {
+    const x = parseFloat(element.dataset.x) || 0;
+    const y = parseFloat(element.dataset.y) || 0;
+    const widthMeters = parseFloat(element.dataset.width) || 0;
+    const heightMeters = parseFloat(element.dataset.height) || 0;
+    const width = metersToPixels(widthMeters);
+    const height = metersToPixels(heightMeters);
+    return {
+        x,
+        y,
+        width,
+        height,
+        centerX: x + width / 2,
+        centerY: y + height / 2,
+    };
+}
+
+function determineDeckForItem(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return null;
+    }
+    const deckAreas = workspaceContent.querySelectorAll('.deck-area');
+    if (!deckAreas.length) {
+        return null;
+    }
+    const { centerX, centerY } = getElementRect(element);
+    for (const deckElement of deckAreas) {
+        const rect = getElementRect(deckElement);
+        const withinX = centerX >= rect.x && centerX <= rect.x + rect.width;
+        const withinY = centerY >= rect.y && centerY <= rect.y + rect.height;
+        if (withinX && withinY) {
+            return deckElement.dataset.label || getItemLabel(deckElement);
+        }
+    }
+    return null;
+}
+
+function recordItemHistory(element, message, timestamp = new Date()) {
+    if (!element || element.dataset.type !== 'item' || !message) {
+        return;
+    }
+    const itemId = element.dataset.itemId;
+    if (!itemId) {
+        return;
+    }
+    if (!itemHistories.has(itemId)) {
+        itemHistories.set(itemId, []);
+    }
+    const events = itemHistories.get(itemId);
+    events.unshift({ message, timestamp });
+    itemHistories.set(itemId, events.slice(0, 50));
+}
+
+function registerItem(element, initialMessage) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    if (!element.dataset.itemId) {
+        element.dataset.itemId = generateItemId();
+    }
+    const itemId = element.dataset.itemId;
+    const timestamp = new Date();
+    const metadata = {
+        id: itemId,
+        element,
+        label: getItemLabel(element),
+        deck: determineDeckForItem(element),
+        lastModified: timestamp,
+        comment: (element.dataset.comment || '').trim(),
+    };
+    itemMetadata.set(itemId, metadata);
+    if (!itemHistories.has(itemId)) {
+        itemHistories.set(itemId, []);
+    }
+    if (initialMessage) {
+        recordItemHistory(element, initialMessage, timestamp);
+    }
+    refreshItemList();
+}
+
+function updateItemRecord(element, message, { updateComment = true, updateDeck = true } = {}) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    if (!element.dataset.itemId) {
+        registerItem(element);
+    }
+    const itemId = element.dataset.itemId;
+    if (!itemId) {
+        return;
+    }
+    const metadata = itemMetadata.get(itemId) || {
+        id: itemId,
+        element,
+        label: '',
+        deck: null,
+        lastModified: new Date(),
+        comment: '',
+    };
+    metadata.label = getItemLabel(element);
+    if (updateDeck) {
+        metadata.deck = determineDeckForItem(element);
+    }
+    if (updateComment) {
+        metadata.comment = (element.dataset.comment || '').trim();
+    }
+    const timestamp = new Date();
+    metadata.lastModified = timestamp;
+    itemMetadata.set(itemId, metadata);
+    if (message) {
+        recordItemHistory(element, message, timestamp);
+    }
+    refreshItemList();
+}
+
+function removeItemRecord(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const itemId = element.dataset.itemId;
+    if (!itemId) {
+        return;
+    }
+    itemMetadata.delete(itemId);
+    itemHistories.delete(itemId);
+    refreshItemList();
+}
+
+function refreshItemList() {
+    if (!historyList) return;
+    historyList.innerHTML = '';
+    const items = Array.from(itemMetadata.values());
+    if (!items.length) {
+        const empty = document.createElement('li');
+        empty.className = 'list-empty';
+        empty.textContent = 'No items yet.';
+        historyList.appendChild(empty);
+        return;
+    }
+    items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+    items.forEach((item) => {
+        const li = document.createElement('li');
+        li.className = 'item-summary';
+        li.dataset.itemId = item.id;
+
+        const currentDeck = determineDeckForItem(item.element) || item.deck || null;
+        if (currentDeck !== item.deck) {
+            item.deck = currentDeck;
+        }
+
+        const header = document.createElement('div');
+        header.className = 'item-summary-header';
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'item-summary-label';
+        labelEl.textContent = item.label;
+
+        const historyButton = document.createElement('button');
+        historyButton.type = 'button';
+        historyButton.className = 'ghost item-history-button';
+        historyButton.textContent = 'History';
+
+        header.appendChild(labelEl);
+        header.appendChild(historyButton);
+
+        const deckEl = document.createElement('div');
+        deckEl.className = 'item-summary-detail';
+        deckEl.textContent = `Deck: ${currentDeck || 'Unassigned'}`;
+
+        const modifiedEl = document.createElement('div');
+        modifiedEl.className = 'item-summary-detail';
+        modifiedEl.textContent = `Last modified: ${formatTimestamp(item.lastModified)}`;
+
+        const commentEl = document.createElement('div');
+        commentEl.className = 'item-summary-comment';
+        commentEl.textContent = item.comment ? `Comment: ${item.comment}` : 'No comment';
+
+        li.append(header, deckEl, modifiedEl, commentEl);
+        historyList.appendChild(li);
+    });
+}
 
 function loadDecks() {
     const stored = localStorage.getItem(decksKey);
@@ -91,8 +298,10 @@ function selectDeck(deck) {
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
     history = [];
-    historyList.innerHTML = '';
     workspaceContent.innerHTML = '';
+    itemMetadata.clear();
+    itemHistories.clear();
+    refreshItemList();
     workspaceState.scale = BASE_SCALE;
     applyWorkspaceTransform();
     closeSettingsMenu();
@@ -112,11 +321,7 @@ function applyWorkspaceTransform() {
 }
 
 function addHistoryEntry(label) {
-    const time = new Date().toLocaleTimeString();
-    const li = document.createElement('li');
-    li.textContent = `${label} • ${time}`;
-    historyList.prepend(li);
-    history.unshift({ label, time });
+    history.unshift({ label, timestamp: new Date() });
 }
 
 function createItemElement({ width, height, label, color, type = 'item' }) {
@@ -154,12 +359,16 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.appendChild(resizeHandle);
 
     setupItemInteractions(element, resizeHandle);
+    const creationMessage = `${type === 'item' ? 'Item' : 'Deck'} created${label ? `: ${label}` : ''}`;
     if (type === 'deck-area') {
         workspaceContent.insertBefore(element, workspaceContent.firstChild);
     } else {
         workspaceContent.appendChild(element);
     }
-    addHistoryEntry(`${type === 'item' ? 'Item' : 'Deck'} created${label ? `: ${label}` : ''}`);
+    addHistoryEntry(creationMessage);
+    if (type === 'item') {
+        registerItem(element, creationMessage);
+    }
     return element;
 }
 
@@ -237,8 +446,12 @@ function setupItemInteractions(element, resizeHandle) {
     element.addEventListener('pointerup', (event) => {
         if (pointerId !== event.pointerId) return;
         element.releasePointerCapture(pointerId);
+        const completedAction = action;
         pointerId = null;
         action = null;
+        if (completedAction && element.dataset.type === 'item') {
+            handleItemInteractionComplete(element, completedAction);
+        }
     });
 
     element.addEventListener('pointercancel', () => {
@@ -265,6 +478,31 @@ function updateElementTransform(element) {
     element.style.transform = `translate(${x}px, ${y}px) rotate(${rotation}deg)`;
 }
 
+function handleItemInteractionComplete(element, completedAction) {
+    if (completedAction === 'move') {
+        const deck = determineDeckForItem(element);
+        const message = deck
+            ? `Item moved to ${deck}${getItemHistoryLabel(element)}`
+            : `Item moved${getItemHistoryLabel(element)}`;
+        addHistoryEntry(message);
+        updateItemRecord(element, message, { updateComment: false, updateDeck: true });
+    } else if (completedAction === 'resize') {
+        const width = parseFloat(element.dataset.width);
+        const height = parseFloat(element.dataset.height);
+        const formattedWidth = Number.isFinite(width) ? width.toFixed(2) : '0.00';
+        const formattedHeight = Number.isFinite(height) ? height.toFixed(2) : '0.00';
+        const message = `Item resized to ${formattedWidth}m × ${formattedHeight}m${getItemHistoryLabel(element)}`;
+        addHistoryEntry(message);
+        updateItemRecord(element, message, { updateComment: false });
+    } else if (completedAction === 'rotate') {
+        const rotation = parseFloat(element.dataset.rotation);
+        const formattedRotation = Number.isFinite(rotation) ? rotation.toFixed(0) : '0';
+        const message = `Item rotated to ${formattedRotation}°${getItemHistoryLabel(element)}`;
+        addHistoryEntry(message);
+        updateItemRecord(element, message, { updateComment: false, updateDeck: false });
+    }
+}
+
 function getItemHistoryLabel(element) {
     const label = element.textContent.trim();
     return label ? `: ${label}` : '';
@@ -276,13 +514,17 @@ function rotateItemBy(element, degrees) {
     element.dataset.rotation = updated.toFixed(2);
     updateElementTransform(element);
     const formattedDegrees = degrees > 0 ? `+${degrees}` : `${degrees}`;
-    addHistoryEntry(`Item rotated ${formattedDegrees}°${getItemHistoryLabel(element)}`);
+    const message = `Item rotated ${formattedDegrees}°${getItemHistoryLabel(element)}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false, updateDeck: false });
 }
 
 function setItemLockState(element, locked) {
     element.dataset.locked = locked ? 'true' : 'false';
     element.classList.toggle('locked', locked);
-    addHistoryEntry(`Item ${locked ? 'locked' : 'unlocked'}${getItemHistoryLabel(element)}`);
+    const message = `Item ${locked ? 'locked' : 'unlocked'}${getItemHistoryLabel(element)}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false, updateDeck: false });
 }
 
 function promptResizeItem(element) {
@@ -310,9 +552,9 @@ function promptResizeItem(element) {
     element.dataset.height = height.toString();
     element.style.width = `${metersToPixels(width)}px`;
     element.style.height = `${metersToPixels(height)}px`;
-    addHistoryEntry(
-        `Item resized to ${width.toFixed(2)}m × ${height.toFixed(2)}m${getItemHistoryLabel(element)}`
-    );
+    const message = `Item resized to ${width.toFixed(2)}m × ${height.toFixed(2)}m${getItemHistoryLabel(element)}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false });
     updateElementTransform(element);
 }
 
@@ -328,13 +570,15 @@ function promptItemComment(element) {
     if (trimmed) {
         element.setAttribute('data-comment', trimmed);
         element.setAttribute('title', trimmed);
-        addHistoryEntry(
-            `${hadComment ? 'Comment updated' : 'Comment added'}${getItemHistoryLabel(element)}`
-        );
+        const message = `${hadComment ? 'Comment updated' : 'Comment added'}${getItemHistoryLabel(element)}`;
+        addHistoryEntry(message);
+        updateItemRecord(element, message, { updateDeck: false, updateComment: true });
     } else {
         element.removeAttribute('data-comment');
         element.removeAttribute('title');
-        addHistoryEntry(`Comment cleared${getItemHistoryLabel(element)}`);
+        const message = `Comment cleared${getItemHistoryLabel(element)}`;
+        addHistoryEntry(message);
+        updateItemRecord(element, message, { updateDeck: false, updateComment: true });
     }
 }
 
@@ -415,8 +659,11 @@ function handleContextAction(action) {
     } else {
         if (action === 'delete') {
             const labelSuffix = getItemHistoryLabel(activeItem);
+            const message = `Item deleted${labelSuffix}`;
+            addHistoryEntry(message);
+            recordItemHistory(activeItem, message);
+            removeItemRecord(activeItem);
             activeItem.remove();
-            addHistoryEntry(`Item deleted${labelSuffix}`);
         } else if (action === 'resize') {
             promptResizeItem(activeItem);
         } else if (action === 'lock-item') {
@@ -622,6 +869,32 @@ createItemBtn.addEventListener('click', handleCreateItem);
 toggleSidebarBtn.addEventListener('click', toggleSidebar);
 createDeckBtn.addEventListener('click', handleCreateDeck);
 backButton.addEventListener('click', goBackToSelection);
+
+historyList.addEventListener('click', (event) => {
+    const button = event.target.closest('.item-history-button');
+    if (!button) {
+        return;
+    }
+    const entry = button.closest('.item-summary');
+    if (!entry) {
+        return;
+    }
+    const { itemId } = entry.dataset;
+    if (!itemId) {
+        return;
+    }
+    const events = itemHistories.get(itemId) || [];
+    if (!events.length) {
+        alert('No history recorded for this item yet.');
+        return;
+    }
+    const historyText = events
+        .map((eventEntry) => `${formatTimestamp(eventEntry.timestamp)} — ${eventEntry.message}`)
+        .join('\n');
+    alert(historyText);
+});
+
+refreshItemList();
 
 initializeDeckSelection();
 setupWorkspaceInteractions();

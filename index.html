@@ -23,10 +23,13 @@
         <section id="workspace-view" class="view">
             <header class="workspace-header">
                 <div class="left-controls">
-                    <button id="back-button" class="ghost">
-                        <span aria-hidden="true">←</span>
-                        <span class="label">Decks</span>
-                    </button>
+                    <div class="nav-controls">
+                        <button id="back-button" class="ghost">
+                            <span aria-hidden="true">←</span>
+                            <span class="label">Decks</span>
+                        </button>
+                        <button id="toggle-sidebar" class="ghost">Toggle list</button>
+                    </div>
                     <div class="toolbar">
                         <label>
                             W (m)
@@ -45,7 +48,6 @@
                             <input type="color" id="input-color" value="#3a7afe" />
                         </label>
                         <button id="create-item" class="primary">Create item</button>
-                        <button id="toggle-sidebar" class="ghost">Toggle history</button>
                     </div>
                 </div>
                 <div class="right-controls">
@@ -61,7 +63,7 @@
 
             <div class="workspace-body">
                 <aside id="history-sidebar" class="sidebar">
-                    <h2>Deck items</h2>
+                    <h2>Item overview</h2>
                     <ul id="history-list"></ul>
                 </aside>
 
