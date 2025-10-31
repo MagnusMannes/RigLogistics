@@ -9,6 +9,8 @@
     --text: #e2e8f0;
     --text-muted: rgba(226, 232, 240, 0.7);
     --danger: #f87171;
+    --divider: rgba(255, 255, 255, 0.12);
+    --sidebar-width: clamp(0px, 90vw, 280px);
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -148,8 +150,8 @@ button.icon-button {
     justify-content: space-between;
     padding: 1rem 1.5rem;
     backdrop-filter: blur(12px);
-    background: rgba(15, 23, 42, 0.7);
-    border-bottom: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.28);
+    border-bottom: 1px solid var(--divider);
     gap: 1rem;
     flex-wrap: wrap;
 }
@@ -181,8 +183,8 @@ button.icon-button {
 .toolbar input[type="number"],
 .toolbar input[type="text"],
 .toolbar input[type="color"] {
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.18);
+    border: 1px solid var(--divider);
     border-radius: 10px;
     padding: 0.55rem 0.75rem;
     color: var(--text);
@@ -201,18 +203,29 @@ button.icon-button {
 }
 
 .sidebar {
-    width: min(280px, 90vw);
-    background: rgba(15, 23, 42, 0.65);
-    border-right: 1px solid var(--border);
+    width: var(--sidebar-width);
+    flex: 0 0 var(--sidebar-width);
+    flex-basis: var(--sidebar-width);
+    background: rgba(15, 23, 42, 0.25);
+    border-right: 1px solid var(--divider);
     padding: 1rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    transition: transform 0.3s ease;
+    overflow: hidden;
+    max-height: 100vh;
+    transition: opacity 0.3s ease, width 0.3s ease, flex-basis 0.3s ease, padding 0.3s ease,
+        margin 0.3s ease, max-height 0.3s ease;
 }
 
 .sidebar.hidden {
-    transform: translateX(-110%);
+    opacity: 0;
+    width: 0;
+    flex-basis: 0;
+    padding: 0;
+    margin: 0;
+    max-height: 0;
+    pointer-events: none;
 }
 
 .sidebar h2 {
@@ -244,9 +257,9 @@ button.icon-button {
     position: relative;
     flex: 1;
     overflow: hidden;
-    background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 40%),
-        radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.2), transparent 45%),
-        #020617;
+    background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 42%),
+        radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.24), transparent 48%),
+        rgba(15, 23, 42, 0.55);
 }
 
 .workspace-content {
@@ -379,13 +392,17 @@ button.icon-button {
 
     .sidebar {
         width: 100%;
+        flex-basis: auto;
         border-right: none;
-        border-bottom: 1px solid var(--border);
-        transform: translateY(0);
+        border-bottom: 1px solid var(--divider);
     }
 
     .sidebar.hidden {
-        transform: translateY(-110%);
+        width: 100%;
+        flex-basis: auto;
+        max-height: 0;
+        opacity: 0;
+        padding: 0;
     }
 }
 
@@ -400,6 +417,7 @@ button.icon-button {
         --text: #0f172a;
         --text-muted: rgba(15, 23, 42, 0.6);
         --danger: #dc2626;
+        --divider: rgba(15, 23, 42, 0.12);
     }
 
     body {
