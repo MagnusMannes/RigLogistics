@@ -64,6 +64,11 @@ const measurementState = {
     points: [],
 };
 
+function updateMeasurementOverlayScale() {
+    const measurementScale = 1 / workspaceState.scale;
+    measurementOverlay.style.setProperty('--measurement-scale', measurementScale.toString());
+}
+
 function metersToPixels(value) {
     return value * PIXELS_PER_METER;
 }
@@ -85,8 +90,8 @@ function ensureMeasurementOverlay() {
 
 function getWorkspacePointFromEvent(event) {
     const rect = workspaceContainer.getBoundingClientRect();
-    const x = (event.clientX - rect.left - workspaceState.translateX) / workspaceState.scale;
-    const y = (event.clientY - rect.top - workspaceState.translateY) / workspaceState.scale;
+    const x = (event.clientX - rect.left) / workspaceState.scale - workspaceState.translateX;
+    const y = (event.clientY - rect.top) / workspaceState.scale - workspaceState.translateY;
     return { x, y };
 }
 
@@ -510,6 +515,7 @@ function goBackToSelection() {
 
 function applyWorkspaceTransform() {
     workspaceContent.style.transform = `translate(${workspaceState.translateX}px, ${workspaceState.translateY}px) scale(${workspaceState.scale})`;
+    updateMeasurementOverlayScale();
     const normalizedScale = (workspaceState.scale / BASE_SCALE) * 100;
     zoomValueEl.textContent = `${Math.round(normalizedScale)}%`;
 }
