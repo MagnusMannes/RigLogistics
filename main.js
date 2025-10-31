@@ -90,8 +90,8 @@ function ensureMeasurementOverlay() {
 
 function getWorkspacePointFromEvent(event) {
     const rect = workspaceContainer.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / workspaceState.scale - workspaceState.translateX;
-    const y = (event.clientY - rect.top) / workspaceState.scale - workspaceState.translateY;
+    const x = (event.clientX - rect.left - workspaceState.translateX) / workspaceState.scale;
+    const y = (event.clientY - rect.top - workspaceState.translateY) / workspaceState.scale;
     return { x, y };
 }
 
