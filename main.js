@@ -124,6 +124,10 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     element.dataset.rotation = '0';
     element.dataset.width = width.toString();
     element.dataset.height = height.toString();
+    if (type === 'item') {
+        element.dataset.locked = 'false';
+        element.dataset.comment = '';
+    }
     element.style.width = `${metersToPixels(width)}px`;
     element.style.height = `${metersToPixels(height)}px`;
     if (type === 'item') {
@@ -143,11 +147,12 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
         element.classList.remove('name-hidden');
     }
 
-    const resizeHandle = document.createElement('div');
-    resizeHandle.className = 'resize-handle';
-    element.appendChild(resizeHandle);
+    const controlHandle = document.createElement('div');
+    controlHandle.className = type === 'item' ? 'rotate-handle' : 'resize-handle';
+    element.appendChild(controlHandle);
 
-    setupItemInteractions(element, resizeHandle);
+    const controlAction = type === 'deck-area' ? 'resize' : 'rotate';
+    setupItemInteractions(element, controlHandle, controlAction);
     if (type === 'deck-area') {
         workspaceContent.insertBefore(element, workspaceContent.firstChild);
     } else {
@@ -157,7 +162,7 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     return element;
 }
 
-function setupItemInteractions(element, resizeHandle) {
+function setupItemInteractions(element, controlHandle, controlAction) {
     let pointerId = null;
     let action = null;
     let start = {};
@@ -169,13 +174,14 @@ function setupItemInteractions(element, resizeHandle) {
 
         const isDeckArea = element.dataset.type === 'deck-area';
         const isLockedDeck = isDeckArea && element.dataset.locked === 'true';
+        const isLockedItem = element.dataset.type === 'item' && element.dataset.locked === 'true';
 
-        if (isLockedDeck) {
+        if (isLockedDeck || isLockedItem) {
             return;
         }
 
-        if (event.target === resizeHandle) {
-            action = 'resize';
+        if (event.target === controlHandle) {
+            action = controlAction;
         } else {
             action = 'move';
         }
@@ -189,6 +195,13 @@ function setupItemInteractions(element, resizeHandle) {
             width: parseFloat(element.dataset.width),
             height: parseFloat(element.dataset.height),
         };
+        if (action === 'rotate') {
+            const rect = element.getBoundingClientRect();
+            start.centerX = rect.left + rect.width / 2;
+            start.centerY = rect.top + rect.height / 2;
+            start.angle = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
+            start.rotation = parseFloat(element.dataset.rotation) || 0;
+        }
         activeItem = element;
     });
 
@@ -209,6 +222,12 @@ function setupItemInteractions(element, resizeHandle) {
             element.dataset.height = newHeight.toString();
             element.style.width = `${metersToPixels(newWidth)}px`;
             element.style.height = `${metersToPixels(newHeight)}px`;
+        } else if (action === 'rotate') {
+            const currentAngle = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
+            const deltaAngle = currentAngle - start.angle;
+            const newRotation = start.rotation + (deltaAngle * 180) / Math.PI;
+            const snappedRotation = Math.round(newRotation / 90) * 90;
+            element.dataset.rotation = snappedRotation.toString();
         }
         updateElementTransform(element);
     });
@@ -247,14 +266,18 @@ function updateElementTransform(element) {
 function handleCreateItem() {
     const rawWidth = parseFloat(inputWidth.value);
     const rawHeight = parseFloat(inputHeight.value);
-    const width = clampToMinSize(Number.isFinite(rawWidth) ? rawWidth : DEFAULT_ITEM_WIDTH_METERS);
-    const height = clampToMinSize(Number.isFinite(rawHeight) ? rawHeight : DEFAULT_ITEM_HEIGHT_METERS);
+    const sizeCandidate = Number.isFinite(rawWidth)
+        ? rawWidth
+        : Number.isFinite(rawHeight)
+        ? rawHeight
+        : DEFAULT_ITEM_WIDTH_METERS;
+    const size = clampToMinSize(sizeCandidate);
     const label = inputLabel.value.trim();
     const color = inputColor.value;
 
-    createItemElement({ width, height, label, color, type: 'item' });
-    inputWidth.value = width.toFixed(2);
-    inputHeight.value = height.toFixed(2);
+    createItemElement({ width: size, height: size, label, color, type: 'item' });
+    inputWidth.value = size.toFixed(2);
+    inputHeight.value = size.toFixed(2);
     inputLabel.value = '';
 }
 
@@ -324,12 +347,22 @@ function handleContextAction(action) {
             addHistoryEntry('Item deleted');
         } else if (action === 'rotate-left') {
             const current = parseFloat(activeItem.dataset.rotation) || 0;
-            activeItem.dataset.rotation = (current - 15).toString();
+            activeItem.dataset.rotation = (current - 90).toString();
             updateElementTransform(activeItem);
         } else if (action === 'rotate-right') {
             const current = parseFloat(activeItem.dataset.rotation) || 0;
-            activeItem.dataset.rotation = (current + 15).toString();
+            activeItem.dataset.rotation = (current + 90).toString();
             updateElementTransform(activeItem);
+        } else if (action === 'resize') {
+            resizeSquareItem(activeItem);
+        } else if (action === 'lock-item') {
+            setItemLockState(activeItem, true);
+            addHistoryEntry('Item locked');
+        } else if (action === 'unlock-item') {
+            setItemLockState(activeItem, false);
+            addHistoryEntry('Item unlocked');
+        } else if (action === 'comment') {
+            promptForItemComment(activeItem);
         }
     }
     closeContextMenu();
@@ -347,11 +380,52 @@ function getContextMenuActions(element) {
             { action: 'toggle-deck-name', label: nameHidden ? 'Show name' : 'Hide name' },
         ];
     }
-    return [
-        { action: 'rotate-left', label: 'Rotate -15°' },
-        { action: 'rotate-right', label: 'Rotate +15°' },
-        { action: 'delete', label: 'Delete', className: 'danger' },
-    ];
+    const locked = element.dataset.locked === 'true';
+    const hasComment = Boolean(element.dataset.comment);
+    const actions = [];
+    if (!locked) {
+        actions.push({ action: 'rotate-left', label: 'Rotate -90°' });
+        actions.push({ action: 'rotate-right', label: 'Rotate +90°' });
+        actions.push({ action: 'resize', label: 'Resize' });
+    }
+    actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
+    actions.push({ action: 'comment', label: hasComment ? 'Edit comment' : 'Add comment' });
+    actions.push({ action: 'delete', label: 'Delete', className: 'danger' });
+    return actions;
+}
+
+function setItemLockState(element, locked) {
+    element.dataset.locked = locked ? 'true' : 'false';
+    element.classList.toggle('locked', locked);
+}
+
+function resizeSquareItem(element) {
+    const currentSize = parseFloat(element.dataset.width) || DEFAULT_ITEM_WIDTH_METERS;
+    const input = prompt('Enter new item size (meters)', currentSize.toFixed(2));
+    if (input === null) return;
+    const parsed = parseFloat(input);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = clampToMinSize(parsed);
+    element.dataset.width = clamped.toString();
+    element.dataset.height = clamped.toString();
+    element.style.width = `${metersToPixels(clamped)}px`;
+    element.style.height = `${metersToPixels(clamped)}px`;
+    addHistoryEntry(`Item resized: ${clamped.toFixed(2)}m`);
+}
+
+function promptForItemComment(element) {
+    const current = element.dataset.comment || '';
+    const input = prompt('Add a comment for this item', current);
+    if (input === null) return;
+    const trimmed = input.trim();
+    element.dataset.comment = trimmed;
+    if (trimmed) {
+        element.title = trimmed;
+        addHistoryEntry('Item comment updated');
+    } else {
+        element.removeAttribute('title');
+        addHistoryEntry('Item comment cleared');
+    }
 }
 
 function setDeckLockState(element, locked) {
