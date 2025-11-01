@@ -57,12 +57,14 @@ let activeItem = null;
 const itemMetadata = new Map();
 const itemHistories = new Map();
 let itemIdCounter = 0;
+let attachmentIdCounter = 0;
 let historySortMode = 'alpha';
 let historySearchQuery = '';
 const measurementState = {
     active: false,
     points: [],
 };
+let modifyDialogState = null;
 
 function updateMeasurementOverlayScale() {
     const measurementScale = 1 / workspaceState.scale;
@@ -235,6 +237,82 @@ function generateItemId() {
     return `item-${Date.now()}-${itemIdCounter}`;
 }
 
+function generateAttachmentId() {
+    attachmentIdCounter += 1;
+    return `attachment-${Date.now()}-${attachmentIdCounter}`;
+}
+
+function ensureItemMetadataRecord(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return null;
+    }
+    if (!element.dataset.itemId) {
+        registerItem(element);
+    }
+    const itemId = element.dataset.itemId;
+    if (!itemId) {
+        return null;
+    }
+    if (!itemMetadata.has(itemId)) {
+        itemMetadata.set(itemId, {
+            id: itemId,
+            element,
+            label: getItemLabel(element),
+            deck: determineDeckForItem(element),
+            lastModified: new Date(),
+            comment: (element.dataset.comment || '').trim(),
+            attachments: [],
+        });
+    }
+    const metadata = itemMetadata.get(itemId);
+    if (!Array.isArray(metadata.attachments)) {
+        metadata.attachments = [];
+    }
+    metadata.element = element;
+    return metadata;
+}
+
+function getItemAttachments(element) {
+    const metadata = ensureItemMetadataRecord(element);
+    return metadata ? metadata.attachments : [];
+}
+
+function updateAttachmentIndicator(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const attachments = getItemAttachments(element);
+    element.dataset.hasAttachments = attachments.length ? 'true' : 'false';
+}
+
+function formatFileSize(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let index = 0;
+    let size = bytes;
+    while (size >= 1024 && index < units.length - 1) {
+        size /= 1024;
+        index += 1;
+    }
+    return `${size.toFixed(size >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function closeModifyDialog() {
+    if (modifyDialogState && modifyDialogState.overlay) {
+        modifyDialogState.overlay.remove();
+    }
+    modifyDialogState = null;
+    document.removeEventListener('keydown', handleModifyDialogKeydown);
+}
+
+function handleModifyDialogKeydown(event) {
+    if (event.key === 'Escape') {
+        closeModifyDialog();
+    }
+}
+
 function formatTimestamp(value) {
     if (!value) {
         return '—';
@@ -314,6 +392,7 @@ function registerItem(element, initialMessage) {
     }
     const itemId = element.dataset.itemId;
     const timestamp = new Date();
+    const existing = itemMetadata.get(itemId);
     const metadata = {
         id: itemId,
         element,
@@ -321,6 +400,7 @@ function registerItem(element, initialMessage) {
         deck: determineDeckForItem(element),
         lastModified: timestamp,
         comment: (element.dataset.comment || '').trim(),
+        attachments: existing && Array.isArray(existing?.attachments) ? existing.attachments : [],
     };
     itemMetadata.set(itemId, metadata);
     if (!itemHistories.has(itemId)) {
@@ -350,6 +430,7 @@ function updateItemRecord(element, message, { updateComment = true, updateDeck =
         deck: null,
         lastModified: new Date(),
         comment: '',
+        attachments: [],
     };
     metadata.label = getItemLabel(element);
     if (updateDeck) {
@@ -357,6 +438,9 @@ function updateItemRecord(element, message, { updateComment = true, updateDeck =
     }
     if (updateComment) {
         metadata.comment = (element.dataset.comment || '').trim();
+    }
+    if (!Array.isArray(metadata.attachments)) {
+        metadata.attachments = [];
     }
     const timestamp = new Date();
     metadata.lastModified = timestamp;
@@ -455,11 +539,18 @@ function refreshItemList() {
         modifiedEl.className = 'item-summary-detail';
         modifiedEl.textContent = `Last modified: ${formatTimestamp(item.lastModified)}`;
 
+        const attachmentsCount = Array.isArray(item.attachments) ? item.attachments.length : 0;
+        const attachmentsEl = document.createElement('div');
+        attachmentsEl.className = 'item-summary-detail';
+        attachmentsEl.textContent = attachmentsCount
+            ? `Attachments: ${attachmentsCount}`
+            : 'Attachments: none';
+
         const commentEl = document.createElement('div');
         commentEl.className = 'item-summary-comment';
         commentEl.textContent = item.comment ? `Comment: ${item.comment}` : 'No comment';
 
-        li.append(header, deckEl, modifiedEl, commentEl);
+        li.append(header, deckEl, modifiedEl, attachmentsEl, commentEl);
         historyList.appendChild(li);
     });
 }
@@ -547,6 +638,7 @@ function createItemElement({ width, height, label, color, type = 'item' }) {
     if (type === 'item') {
         element.style.background = color;
         element.textContent = label || 'New item';
+        updateAttachmentIndicator(element);
     } else {
         element.style.background = '#ffffff';
         element.style.color = '#0f172a';
@@ -789,6 +881,352 @@ function promptItemComment(element) {
     }
 }
 
+function duplicateItem(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return null;
+    }
+    const width = parseFloat(element.dataset.width) || DEFAULT_ITEM_WIDTH_METERS;
+    const height = parseFloat(element.dataset.height) || DEFAULT_ITEM_HEIGHT_METERS;
+    const label = getItemLabel(element);
+    const color = rgbToHex(getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe');
+    const duplicate = createItemElement({ width, height, label, color, type: 'item' });
+    const offset = 40;
+    const baseX = parseFloat(element.dataset.x) || 0;
+    const baseY = parseFloat(element.dataset.y) || 0;
+    duplicate.dataset.x = (baseX + offset).toString();
+    duplicate.dataset.y = (baseY + offset).toString();
+    updateElementTransform(duplicate);
+    const originalAttachments = getItemAttachments(element);
+    if (originalAttachments.length) {
+        const duplicateMetadata = ensureItemMetadataRecord(duplicate);
+        duplicateMetadata.attachments = originalAttachments.map((attachment) => ({
+            ...attachment,
+            id: generateAttachmentId(),
+        }));
+        updateAttachmentIndicator(duplicate);
+    }
+    const message = `Item duplicated${getItemHistoryLabel(duplicate)}`;
+    addHistoryEntry(message);
+    updateItemRecord(duplicate, message, { updateComment: false });
+    return duplicate;
+}
+
+function removeItemAttachment(element, attachmentId) {
+    const metadata = ensureItemMetadataRecord(element);
+    if (!metadata) {
+        return;
+    }
+    const index = metadata.attachments.findIndex((attachment) => attachment.id === attachmentId);
+    if (index === -1) {
+        return;
+    }
+    const [removed] = metadata.attachments.splice(index, 1);
+    const message = `Attachment removed (${removed.name})${getItemHistoryLabel(element)}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false });
+    updateAttachmentIndicator(element);
+    if (modifyDialogState) {
+        renderModifyDialogAttachments();
+    }
+}
+
+function promptItemAttachment(element, { onComplete } = {}) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '';
+    input.multiple = true;
+    input.addEventListener('change', () => {
+        const files = Array.from(input.files || []);
+        if (!files.length) {
+            return;
+        }
+        files.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const metadata = ensureItemMetadataRecord(element);
+                if (!metadata) {
+                    return;
+                }
+                metadata.attachments.push({
+                    id: generateAttachmentId(),
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    dataUrl: typeof reader.result === 'string' ? reader.result : '',
+                    addedAt: new Date().toISOString(),
+                });
+                const message = `Attachment added (${file.name})${getItemHistoryLabel(element)}`;
+                addHistoryEntry(message);
+                updateItemRecord(element, message, { updateComment: false });
+                updateAttachmentIndicator(element);
+                if (typeof onComplete === 'function') {
+                    onComplete();
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+        input.value = '';
+    });
+    input.click();
+}
+
+function renderModifyDialogAttachments() {
+    if (!modifyDialogState || !modifyDialogState.attachmentsList) {
+        return;
+    }
+    const { attachmentsList, element, locked } = modifyDialogState;
+    attachmentsList.innerHTML = '';
+    const attachments = getItemAttachments(element);
+    if (!attachments.length) {
+        const empty = document.createElement('li');
+        empty.className = 'attachment-empty';
+        empty.textContent = 'No attachments yet.';
+        attachmentsList.appendChild(empty);
+        return;
+    }
+    attachments.forEach((attachment) => {
+        const item = document.createElement('li');
+        item.className = 'attachment-item';
+        const link = document.createElement('a');
+        link.href = attachment.dataUrl || '#';
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.download = attachment.name;
+        link.textContent = `${attachment.name} (${formatFileSize(attachment.size)})`;
+        item.appendChild(link);
+        if (!locked) {
+            const removeButton = document.createElement('button');
+            removeButton.type = 'button';
+            removeButton.className = 'ghost attachment-remove';
+            removeButton.textContent = 'Remove';
+            removeButton.addEventListener('click', () => {
+                removeItemAttachment(element, attachment.id);
+            });
+            item.appendChild(removeButton);
+        }
+        attachmentsList.appendChild(item);
+    });
+}
+
+function openItemModifyDialog(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    closeModifyDialog();
+    const locked = element.dataset.locked === 'true';
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            closeModifyDialog();
+        }
+    });
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal-panel';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+
+    const title = document.createElement('h2');
+    title.textContent = locked ? 'Item details' : 'Modify item';
+    const titleId = `modify-dialog-title-${Date.now()}`;
+    title.id = titleId;
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.appendChild(title);
+
+    const form = document.createElement('form');
+    form.className = 'modify-form';
+
+    const sizeFieldset = document.createElement('fieldset');
+    const sizeLegend = document.createElement('legend');
+    sizeLegend.textContent = 'Size (meters)';
+    sizeFieldset.appendChild(sizeLegend);
+
+    const widthInput = document.createElement('input');
+    widthInput.type = 'number';
+    widthInput.min = MIN_ITEM_SIZE_METERS.toString();
+    widthInput.step = '0.1';
+    widthInput.value = (parseFloat(element.dataset.width) || DEFAULT_ITEM_WIDTH_METERS).toFixed(2);
+    widthInput.required = true;
+    widthInput.setAttribute('aria-label', 'Width in meters');
+
+    const heightInput = document.createElement('input');
+    heightInput.type = 'number';
+    heightInput.min = MIN_ITEM_SIZE_METERS.toString();
+    heightInput.step = '0.1';
+    heightInput.value = (parseFloat(element.dataset.height) || DEFAULT_ITEM_HEIGHT_METERS).toFixed(2);
+    heightInput.required = true;
+    heightInput.setAttribute('aria-label', 'Height in meters');
+
+    sizeFieldset.append(widthInput, heightInput);
+
+    const labelFieldset = document.createElement('fieldset');
+    const labelLegend = document.createElement('legend');
+    labelLegend.textContent = 'Label';
+    labelFieldset.appendChild(labelLegend);
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    const currentLabel = element.textContent.trim();
+    labelInput.value = currentLabel === 'Unnamed item' ? '' : currentLabel;
+    labelInput.placeholder = 'Item label';
+    labelFieldset.appendChild(labelInput);
+
+    const colorFieldset = document.createElement('fieldset');
+    const colorLegend = document.createElement('legend');
+    colorLegend.textContent = 'Color';
+    colorFieldset.appendChild(colorLegend);
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    const computedStyle = getComputedStyle(element);
+    colorInput.value = rgbToHex(computedStyle.backgroundColor || element.style.background || '#3a7afe');
+    colorInput.setAttribute('aria-label', 'Item color');
+    colorFieldset.appendChild(colorInput);
+
+    const actions = document.createElement('div');
+    actions.className = 'modify-actions';
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'ghost';
+    cancelButton.textContent = 'Close';
+    cancelButton.addEventListener('click', () => {
+        closeModifyDialog();
+    });
+
+    const saveButton = document.createElement('button');
+    saveButton.type = 'submit';
+    saveButton.className = 'primary';
+    saveButton.textContent = locked ? 'Done' : 'Apply changes';
+
+    const duplicateButton = document.createElement('button');
+    duplicateButton.type = 'button';
+    duplicateButton.className = 'ghost';
+    duplicateButton.textContent = 'Duplicate item';
+    duplicateButton.addEventListener('click', () => {
+        duplicateItem(element);
+    });
+
+    const attachmentSection = document.createElement('section');
+    attachmentSection.className = 'modify-section';
+    const attachmentHeader = document.createElement('div');
+    attachmentHeader.className = 'modify-section-header';
+    const attachmentTitle = document.createElement('h3');
+    attachmentTitle.textContent = 'Attachments';
+    attachmentHeader.appendChild(attachmentTitle);
+
+    if (!locked) {
+        const addAttachmentButton = document.createElement('button');
+        addAttachmentButton.type = 'button';
+        addAttachmentButton.className = 'ghost';
+        addAttachmentButton.textContent = 'Add attachment';
+        addAttachmentButton.addEventListener('click', () => {
+            promptItemAttachment(element, { onComplete: renderModifyDialogAttachments });
+        });
+        attachmentHeader.appendChild(addAttachmentButton);
+    }
+
+    attachmentSection.appendChild(attachmentHeader);
+    const attachmentsList = document.createElement('ul');
+    attachmentsList.className = 'attachment-list';
+    attachmentSection.appendChild(attachmentsList);
+
+    form.append(sizeFieldset, labelFieldset, colorFieldset, attachmentSection);
+    actions.append(cancelButton);
+    if (!locked) {
+        actions.append(duplicateButton, saveButton);
+    } else {
+        actions.append(saveButton);
+    }
+    form.append(actions);
+    dialog.appendChild(form);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    modifyDialogState = { overlay, element, attachmentsList, locked };
+    renderModifyDialogAttachments();
+    document.addEventListener('keydown', handleModifyDialogKeydown);
+
+    if (locked) {
+        widthInput.disabled = true;
+        heightInput.disabled = true;
+        labelInput.disabled = true;
+        colorInput.disabled = true;
+        duplicateButton.disabled = true;
+    }
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (locked) {
+            closeModifyDialog();
+            return;
+        }
+        applyItemModifications(element, {
+            width: parseFloat(widthInput.value),
+            height: parseFloat(heightInput.value),
+            label: labelInput.value,
+            color: colorInput.value,
+        });
+        closeModifyDialog();
+    });
+}
+
+function rgbToHex(color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return '#3a7afe';
+    }
+    ctx.fillStyle = color || '#3a7afe';
+    return ctx.fillStyle;
+}
+
+function applyItemModifications(element, { width, height, label, color }) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const currentWidth = parseFloat(element.dataset.width) || DEFAULT_ITEM_WIDTH_METERS;
+    const currentHeight = parseFloat(element.dataset.height) || DEFAULT_ITEM_HEIGHT_METERS;
+    const normalizedWidth = clampToMinSize(Number.isFinite(width) ? width : currentWidth);
+    const normalizedHeight = clampToMinSize(Number.isFinite(height) ? height : currentHeight);
+    const previousLabel = getItemLabel(element);
+    const previousColor = rgbToHex(getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe');
+
+    const changes = [];
+    if (normalizedWidth !== currentWidth || normalizedHeight !== currentHeight) {
+        element.dataset.width = normalizedWidth.toString();
+        element.dataset.height = normalizedHeight.toString();
+        element.style.width = `${metersToPixels(normalizedWidth)}px`;
+        element.style.height = `${metersToPixels(normalizedHeight)}px`;
+        changes.push(`size ${normalizedWidth.toFixed(2)}m × ${normalizedHeight.toFixed(2)}m`);
+    }
+
+    const trimmedLabel = label.trim();
+    if (trimmedLabel && trimmedLabel !== previousLabel) {
+        element.textContent = trimmedLabel;
+        changes.push(`label "${trimmedLabel}"`);
+    } else if (!trimmedLabel && previousLabel !== 'Unnamed item') {
+        element.textContent = 'Unnamed item';
+        changes.push('label cleared');
+    }
+
+    if (color && color !== previousColor) {
+        element.style.background = color;
+        changes.push(`color ${color}`);
+    }
+
+    if (!changes.length) {
+        return;
+    }
+    updateAttachmentIndicator(element);
+    updateElementTransform(element);
+    const message = `Item modified (${changes.join(', ')})${getItemHistoryLabel(element)}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false });
+}
+
 function handleCreateItem() {
     const rawWidth = parseFloat(inputWidth.value);
     const rawHeight = parseFloat(inputHeight.value);
@@ -864,7 +1302,13 @@ function handleContextAction(action) {
             toggleDeckNameVisibility(activeItem);
         }
     } else {
-        if (action === 'delete') {
+        if (action === 'modify-item') {
+            closeContextMenu();
+            openItemModifyDialog(activeItem);
+            return;
+        } else if (action === 'attach-file') {
+            promptItemAttachment(activeItem, { onComplete: renderModifyDialogAttachments });
+        } else if (action === 'delete') {
             const labelSuffix = getItemHistoryLabel(activeItem);
             const message = `Item deleted${labelSuffix}`;
             addHistoryEntry(message);
@@ -899,7 +1343,9 @@ function getContextMenuActions(element) {
     const locked = element.dataset.locked === 'true';
     const hasComment = Boolean((element.dataset.comment || '').trim());
     const actions = [];
+    actions.push({ action: 'modify-item', label: locked ? 'View details…' : 'Modify…' });
     if (!locked) {
+        actions.push({ action: 'attach-file', label: 'Attach file…' });
         actions.push({ action: 'resize', label: 'Resize…' });
     }
     actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
