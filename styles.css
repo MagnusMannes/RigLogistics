@@ -260,6 +260,10 @@ button.icon-button {
     min-height: 0;
 }
 
+#history-sidebar {
+    order: 1;
+}
+
 .sidebar {
     width: var(--sidebar-width);
     flex: 0 0 var(--sidebar-width);
@@ -281,6 +285,8 @@ button.icon-button {
     border-left: 1px solid var(--panel-light-border);
     border-right: none;
     gap: 0.75rem;
+    order: 3;
+    margin-left: auto;
 }
 
 .planning-sidebar.disabled {
@@ -367,6 +373,39 @@ button.icon-button {
 
 .planning-job-entry .planning-job-toggle {
     flex: 1;
+}
+
+.planning-job-delete {
+    border: none;
+    background: rgba(248, 113, 113, 0.12);
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 0.85rem;
+    line-height: 1;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.planning-job-delete:hover {
+    background: rgba(248, 113, 113, 0.22);
+    transform: translateY(-1px);
+}
+
+.planning-job-delete:focus-visible {
+    outline: 2px solid rgba(248, 113, 113, 0.6);
+    outline-offset: 2px;
+}
+
+.planning-job-delete:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .planning-job-label {
@@ -516,6 +555,18 @@ button.icon-button {
     background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 42%),
         radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.24), transparent 48%),
         rgba(15, 23, 42, 0.55);
+    order: 2;
+}
+
+.workspace-container.planning-locked .item,
+.workspace-container.planning-locked .deck-area {
+    pointer-events: none;
+}
+
+.workspace-container.planning-hide-current .workspace-content > .item,
+.workspace-container.planning-hide-current .workspace-content > .deck-area {
+    opacity: 0;
+    visibility: hidden;
 }
 
 .workspace-content {

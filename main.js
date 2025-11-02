@@ -34,7 +34,6 @@ const toolsMenu = document.getElementById('tools-menu');
 const measureToggleBtn = document.getElementById('toggle-measure-mode');
 const togglePlanningModeBtn = document.getElementById('toggle-planning-mode');
 const createPlanningJobBtn = document.getElementById('create-planning-job');
-const deletePlanningJobBtn = document.getElementById('delete-planning-job');
 const planningIndicator = document.getElementById('planning-indicator');
 const planningSidebar = document.getElementById('planning-sidebar');
 const planningCurrentDeckToggle = document.getElementById('planning-current-deck');
@@ -83,6 +82,7 @@ let modifyDialogState = null;
 const planningState = {
     active: false,
     activeJobIds: new Set(),
+    showCurrentDeck: true,
 };
 let deckModifyMode = false;
 
@@ -367,6 +367,23 @@ function generatePlanningJobId() {
     return `plan-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function generatePlanningJobLabel(existingJobs = []) {
+    const deckName = typeof currentDeck?.name === 'string' ? currentDeck.name.trim() : '';
+    const baseLabel = deckName ? `${deckName} plan` : 'Planning deck';
+    const usedLabels = new Set(
+        existingJobs
+            .map((job) => (typeof job.label === 'string' ? job.label.trim().toLowerCase() : ''))
+            .filter(Boolean)
+    );
+    let index = existingJobs.length + 1;
+    let candidate = `${baseLabel} ${index}`;
+    while (usedLabels.has(candidate.toLowerCase())) {
+        index += 1;
+        candidate = `${baseLabel} ${index}`;
+    }
+    return candidate;
+}
+
 function createDeckRecord(name, { id, jobs } = {}) {
     return {
         id: typeof id === 'string' && id.trim() ? id : generateDeckId(),
@@ -513,7 +530,6 @@ function isColorDark(hex) {
 function updatePlanningStateUI() {
     const planningActive = planningState.active;
     const hasDeck = Boolean(currentDeck);
-    const hasActiveJobs = planningState.activeJobIds.size > 0;
     if (workspaceHeader) {
         workspaceHeader.classList.toggle('planning-mode', planningActive);
     }
@@ -526,7 +542,7 @@ function updatePlanningStateUI() {
     }
     if (planningCurrentDeckToggle) {
         const canToggle = planningActive && hasDeck;
-        const showCurrentDeck = canToggle && !hasActiveJobs;
+        const showCurrentDeck = planningState.showCurrentDeck && canToggle;
         planningCurrentDeckToggle.disabled = !canToggle;
         planningCurrentDeckToggle.setAttribute('aria-pressed', showCurrentDeck ? 'true' : 'false');
         planningCurrentDeckToggle.classList.toggle('active', showCurrentDeck);
@@ -536,6 +552,13 @@ function updatePlanningStateUI() {
         togglePlanningModeBtn.setAttribute('aria-pressed', planningActive ? 'true' : 'false');
         togglePlanningModeBtn.classList.toggle('active', planningActive);
     }
+    if (workspaceContainer) {
+        workspaceContainer.classList.toggle('planning-locked', planningActive);
+        workspaceContainer.classList.toggle(
+            'planning-hide-current',
+            planningActive && !planningState.showCurrentDeck
+        );
+    }
 }
 
 function updatePlanningControlsState() {
@@ -543,10 +566,6 @@ function updatePlanningControlsState() {
     const hasDeck = planningActive && Boolean(currentDeck);
     if (createPlanningJobBtn) {
         createPlanningJobBtn.disabled = !hasDeck;
-    }
-    if (deletePlanningJobBtn) {
-        const jobCount = hasDeck ? getCurrentDeckJobs().length : 0;
-        deletePlanningJobBtn.disabled = !hasDeck || jobCount === 0;
     }
 }
 
@@ -556,6 +575,7 @@ function enterPlanningMode() {
         return;
     }
     planningState.active = true;
+    planningState.showCurrentDeck = true;
     renderPlanningJobs();
     closeToolsMenu();
 }
@@ -566,6 +586,7 @@ function exitPlanningMode() {
         return;
     }
     planningState.active = false;
+    planningState.showCurrentDeck = true;
     renderPlanningJobs();
     closeToolsMenu();
 }
@@ -635,6 +656,7 @@ function renderPlanningJobs() {
     }
     if (!currentDeck) {
         planningState.activeJobIds.clear();
+        planningState.showCurrentDeck = true;
         planningJobsList.innerHTML = '';
         clearPlanningOverlays();
         if (planningOverlayHost.isConnected) {
@@ -658,6 +680,7 @@ function renderPlanningJobs() {
     planningJobsList.innerHTML = '';
     if (!jobs.length) {
         planningState.activeJobIds.clear();
+        planningState.showCurrentDeck = true;
         clearPlanningOverlays();
         if (planningOverlayHost.isConnected) {
             planningOverlayHost.remove();
@@ -686,6 +709,17 @@ function renderPlanningJobs() {
         toggle.disabled = !planningActive;
         toggle.addEventListener('click', () => togglePlanningJob(job.id));
         entry.appendChild(toggle);
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'planning-job-delete';
+        deleteButton.setAttribute('aria-label', `Delete planning deck ${job.label}`);
+        deleteButton.textContent = '×';
+        deleteButton.disabled = !planningActive;
+        deleteButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            deletePlanningJob(job.id);
+        });
+        entry.appendChild(deleteButton);
         planningJobsList.appendChild(entry);
         if (planningActive) {
             renderPlanningJobOverlay(job);
@@ -728,10 +762,27 @@ function handlePlanningCurrentDeckToggle() {
     if (!currentDeck) {
         return;
     }
-    if (!planningState.activeJobIds.size) {
+    planningState.showCurrentDeck = !planningState.showCurrentDeck;
+    updatePlanningStateUI();
+}
+
+function deletePlanningJob(jobId) {
+    if (!currentDeck) {
         return;
     }
-    planningState.activeJobIds.clear();
+    const jobs = getCurrentDeckJobs();
+    const index = jobs.findIndex((job) => job.id === jobId);
+    if (index === -1) {
+        return;
+    }
+    const job = jobs[index];
+    const shouldDelete = confirm(`Delete planning deck "${job.label}"?`);
+    if (!shouldDelete) {
+        return;
+    }
+    jobs.splice(index, 1);
+    planningState.activeJobIds.delete(jobId);
+    saveDecks();
     renderPlanningJobs();
 }
 
@@ -908,68 +959,16 @@ function handleCreatePlanningJob() {
         alert('Select a deck before creating a planning deck.');
         return;
     }
-    const label = prompt('Name for the new planning deck?');
-    if (label === null) {
-        return;
-    }
-    const trimmed = label.trim();
-    if (!trimmed) {
-        alert('Please provide a name for the planning deck.');
-        return;
-    }
+    const jobs = getCurrentDeckJobs();
+    const label = generatePlanningJobLabel(jobs);
     const job = {
         id: generatePlanningJobId(),
-        label: trimmed,
+        label,
         deck: { items: serializeWorkspaceElements() },
     };
-    const jobs = getCurrentDeckJobs();
     jobs.push(job);
     planningState.activeJobIds.clear();
     planningState.activeJobIds.add(job.id);
-    saveDecks();
-    renderPlanningJobs();
-}
-
-function handleDeletePlanningJob() {
-    if (!planningState.active) {
-        alert('Enter planning mode before deleting planning decks.');
-        return;
-    }
-    if (!currentDeck) {
-        alert('Select a deck before deleting planning decks.');
-        return;
-    }
-    const jobs = getCurrentDeckJobs();
-    if (!jobs.length) {
-        alert('There are no planning decks to delete.');
-        return;
-    }
-    if (jobs.length === 1) {
-        const [job] = jobs;
-        const shouldDelete = confirm(`Delete planning deck "${job.label}"?`);
-        if (!shouldDelete) {
-            return;
-        }
-        jobs.splice(0, 1);
-        planningState.activeJobIds.clear();
-        saveDecks();
-        renderPlanningJobs();
-        return;
-    }
-    const options = jobs
-        .map((job, index) => `${index + 1}. ${job.label}`)
-        .join('\n');
-    const input = prompt(`Enter the number of the planning deck to delete:\n${options}`);
-    if (!input) {
-        return;
-    }
-    const selectedIndex = Number.parseInt(input, 10);
-    if (!Number.isFinite(selectedIndex) || selectedIndex < 1 || selectedIndex > jobs.length) {
-        alert('Please enter a valid number.');
-        return;
-    }
-    const [removed] = jobs.splice(selectedIndex - 1, 1);
-    planningState.activeJobIds.delete(removed.id);
     saveDecks();
     renderPlanningJobs();
 }
@@ -1365,6 +1364,7 @@ function selectDeck(deck) {
     currentDeck = selectedDeck;
     deactivateMeasureMode();
     planningState.activeJobIds.clear();
+    planningState.showCurrentDeck = true;
     localStorage.setItem(selectedDeckKey, currentDeck.name);
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
@@ -1387,6 +1387,7 @@ function goBackToSelection() {
     currentDeck = null;
     deactivateMeasureMode();
     planningState.activeJobIds.clear();
+    planningState.showCurrentDeck = true;
     localStorage.removeItem(selectedDeckKey);
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
@@ -1466,6 +1467,10 @@ function setupItemInteractions(element, resizeHandle) {
 
     element.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) {
+            return;
+        }
+
+        if (planningState.active) {
             return;
         }
 
@@ -2553,12 +2558,6 @@ if (planningCurrentDeckToggle) {
 if (createPlanningJobBtn) {
     createPlanningJobBtn.addEventListener('click', () => {
         handleCreatePlanningJob();
-    });
-}
-
-if (deletePlanningJobBtn) {
-    deletePlanningJobBtn.addEventListener('click', () => {
-        handleDeletePlanningJob();
     });
 }
 
