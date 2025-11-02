@@ -23,7 +23,14 @@ const sortDateBtn = document.getElementById('sort-date');
 const workspaceContainer = document.getElementById('workspace-container');
 const workspaceContent = document.getElementById('workspace-content');
 const createItemBtn = document.getElementById('create-item');
-const addDeckAreaBtn = document.getElementById('add-deck-area');
+const deckSettingsButton = document.getElementById('deck-settings-button');
+const deckSettingsPanel = document.getElementById('deck-settings-panel');
+const deckCreateButton = document.getElementById('deck-create-button');
+const deckDeleteButton = document.getElementById('deck-delete-button');
+const deckModifyToggleBtn = document.getElementById('deck-modify-toggle');
+const deckDownloadButton = document.getElementById('deck-download-button');
+const deckUploadButton = document.getElementById('deck-upload-button');
+const deckAddAreaButton = document.getElementById('deck-add-area-button');
 const toolsButton = document.getElementById('tools-button');
 const toolsMenu = document.getElementById('tools-menu');
 const measureToggleBtn = document.getElementById('toggle-measure-mode');
@@ -38,6 +45,7 @@ const workspaceHeader = document.querySelector('.workspace-header');
 const contextMenu = document.getElementById('context-menu');
 const zoomValueEl = document.getElementById('zoom-value');
 const measurementInstructions = document.getElementById('measurement-instructions');
+const deckModifyNotice = document.getElementById('deck-modify-notice');
 
 const inputWidth = document.getElementById('input-width');
 const inputHeight = document.getElementById('input-height');
@@ -78,6 +86,69 @@ const planningState = {
     active: false,
     activeJobIds: new Set(),
 };
+let deckModifyMode = false;
+
+function setDeckSettingsVisibility(visible) {
+    if (!deckSettingsPanel) {
+        return;
+    }
+    const shouldShow = Boolean(visible);
+    deckSettingsPanel.classList.toggle('open', shouldShow);
+    deckSettingsPanel.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    if (deckSettingsButton) {
+        deckSettingsButton.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
+    }
+}
+
+function closeDeckSettingsPanel() {
+    setDeckSettingsVisibility(false);
+}
+
+function toggleDeckSettingsPanel() {
+    if (!deckSettingsPanel) {
+        return;
+    }
+    const isOpen = deckSettingsPanel.classList.contains('open');
+    setDeckSettingsVisibility(!isOpen);
+    updateDeckSettingsButtons();
+}
+
+function updateDeckSettingsButtons() {
+    if (deckModifyToggleBtn) {
+        deckModifyToggleBtn.textContent = deckModifyMode ? 'Exit modify mode' : 'Enter modify mode';
+    }
+    if (deckDownloadButton) {
+        deckDownloadButton.disabled = !deckModifyMode;
+        deckDownloadButton.setAttribute('aria-disabled', deckModifyMode ? 'false' : 'true');
+    }
+    if (deckUploadButton) {
+        deckUploadButton.disabled = !deckModifyMode;
+        deckUploadButton.setAttribute('aria-disabled', deckModifyMode ? 'false' : 'true');
+    }
+    if (deckAddAreaButton) {
+        deckAddAreaButton.disabled = !deckModifyMode;
+        deckAddAreaButton.setAttribute('aria-disabled', deckModifyMode ? 'false' : 'true');
+    }
+}
+
+function setDeckModifyMode(active) {
+    const shouldActivate = Boolean(active);
+    if (deckModifyMode === shouldActivate) {
+        updateDeckSettingsButtons();
+        return;
+    }
+    deckModifyMode = shouldActivate;
+    if (workspaceHeader) {
+        workspaceHeader.classList.toggle('modify-mode', deckModifyMode);
+    }
+    if (deckModifyNotice) {
+        deckModifyNotice.hidden = !deckModifyMode;
+    }
+    updateDeckSettingsButtons();
+    if (!deckModifyMode) {
+        closeContextMenu();
+    }
+}
 
 function updateMeasurementOverlayScale() {
     const measurementScale = 1 / workspaceState.scale;
@@ -1126,6 +1197,8 @@ function selectDeck(deck) {
     if (!selectedDeck) {
         return;
     }
+    setDeckModifyMode(false);
+    closeDeckSettingsPanel();
     currentDeck = selectedDeck;
     deactivateMeasureMode();
     planningState.activeJobIds.clear();
@@ -1155,6 +1228,9 @@ function goBackToSelection() {
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
     renderPlanningJobs();
+    setDeckModifyMode(false);
+    closeDeckSettingsPanel();
+    closeToolsMenu();
 }
 
 function applyWorkspaceTransform() {
@@ -1230,6 +1306,10 @@ function setupItemInteractions(element, resizeHandle) {
         const isDeckArea = element.dataset.type === 'deck-area';
         const isLockedDeck = isDeckArea && element.dataset.locked === 'true';
         const isLockedItem = !isDeckArea && element.dataset.locked === 'true';
+
+        if (isDeckArea && !deckModifyMode) {
+            return;
+        }
 
         if (isLockedDeck || isLockedItem) {
             return;
@@ -1803,6 +1883,10 @@ function toggleToolsMenu() {
     if (shouldOpen) {
         updateMeasureToggleButton();
         updatePlanningStateUI();
+        closeDeckSettingsPanel();
+        updateDeckSettingsButtons();
+    } else {
+        closeDeckSettingsPanel();
     }
 }
 
@@ -1813,6 +1897,7 @@ function closeToolsMenu() {
     if (toolsButton) {
         toolsButton.setAttribute('aria-expanded', 'false');
     }
+    closeDeckSettingsPanel();
 }
 
 function openContextMenu(x, y) {
@@ -1850,6 +1935,10 @@ function handleContextAction(action) {
     if (!activeItem) return;
     const type = activeItem.dataset.type;
     if (type === 'deck-area') {
+        if (!deckModifyMode) {
+            closeContextMenu();
+            return;
+        }
         const deckLabel = activeItem.dataset.label || 'Deck';
         const labelSuffix = deckLabel ? `: ${deckLabel}` : '';
         if (action === 'lock-deck') {
@@ -1894,6 +1983,9 @@ function getContextMenuActions(element) {
     if (!element) return [];
     const type = element.dataset.type;
     if (type === 'deck-area') {
+        if (!deckModifyMode) {
+            return [];
+        }
         const locked = element.dataset.locked === 'true';
         const nameHidden = element.dataset.nameHidden === 'true';
         return [
@@ -1949,6 +2041,10 @@ function toggleDeckNameVisibility(element) {
 }
 
 function handleAddDeckArea() {
+    if (!deckModifyMode) {
+        alert('Enter deck modify mode before adding deck areas.');
+        return;
+    }
     const size = DEFAULT_DECK_AREA_SIZE_METERS;
     createItemElement({
         width: size,
@@ -1961,6 +2057,8 @@ function handleAddDeckArea() {
 }
 
 function initializeDeckSelection() {
+    setDeckModifyMode(false);
+    updateDeckSettingsButtons();
     renderDeckList();
     const storedSelection = localStorage.getItem(selectedDeckKey);
     if (storedSelection) {
@@ -1988,6 +2086,118 @@ function handleCreateDeck() {
     decks.push(createDeckRecord(trimmed));
     saveDecks();
     renderDeckList();
+}
+
+function handleDeleteDeck() {
+    if (!decks.length) {
+        alert('There are no decks to delete.');
+        return;
+    }
+    const options = decks
+        .map((deck, index) => `${index + 1}. ${deck.name}`)
+        .join('\n');
+    const input = prompt(`Enter the number of the deck to delete:\n${options}`);
+    if (input === null) {
+        return;
+    }
+    const selectedIndex = Number.parseInt(input, 10);
+    if (!Number.isFinite(selectedIndex) || selectedIndex < 1 || selectedIndex > decks.length) {
+        alert('Please enter a valid number.');
+        return;
+    }
+    const deckToRemove = decks[selectedIndex - 1];
+    const shouldDelete = confirm(
+        `Delete deck "${deckToRemove.name}"? This will also remove its planning decks.`
+    );
+    if (!shouldDelete) {
+        return;
+    }
+    decks.splice(selectedIndex - 1, 1);
+    saveDecks();
+    renderDeckList();
+    if (currentDeck && currentDeck.id === deckToRemove.id) {
+        goBackToSelection();
+    }
+}
+
+function handleDownloadDecks() {
+    if (!deckModifyMode) {
+        alert('Enter deck modify mode before downloading a backup.');
+        return;
+    }
+    const payload = {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        decks: decks.map((deck) => deckToSerializable(deck)),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const timestamp = new Date().toISOString().slice(0, 10);
+    link.download = `riglogistics-decks-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function handleUploadDecks() {
+    if (!deckModifyMode) {
+        alert('Enter deck modify mode before uploading a backup.');
+        return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.addEventListener('change', async () => {
+        const [file] = Array.from(input.files || []);
+        if (!file) {
+            return;
+        }
+        try {
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            const deckEntries = Array.isArray(parsed)
+                ? parsed
+                : Array.isArray(parsed?.decks)
+                ? parsed.decks
+                : null;
+            if (!Array.isArray(deckEntries) || !deckEntries.length) {
+                alert('The selected file does not contain any decks.');
+                return;
+            }
+            const normalized = deckEntries.map((entry) => normalizeDeckEntry(entry));
+            if (!normalized.length) {
+                alert('No valid decks were found in the selected file.');
+                return;
+            }
+            const previousDeckId = currentDeck?.id || null;
+            const previousDeckName = currentDeck?.name || null;
+            decks = normalized;
+            saveDecks();
+            renderDeckList();
+            if (previousDeckId || previousDeckName) {
+                const nextDeck = decks.find(
+                    (deck) => deck.id === previousDeckId || deck.name === previousDeckName
+                );
+                if (nextDeck) {
+                    selectDeck(nextDeck);
+                } else {
+                    goBackToSelection();
+                }
+            } else {
+                goBackToSelection();
+            }
+            alert(`Loaded ${normalized.length} deck${normalized.length === 1 ? '' : 's'} from backup.`);
+        } catch (error) {
+            console.error('Unable to import decks', error);
+            alert('Unable to import decks. Please ensure the file is a valid backup.');
+        } finally {
+            input.value = '';
+        }
+    });
+    input.click();
 }
 
 function setupWorkspaceInteractions() {
@@ -2086,8 +2296,59 @@ if (toolsMenu) {
     });
 }
 
-if (addDeckAreaBtn) {
-    addDeckAreaBtn.addEventListener('click', handleAddDeckArea);
+if (deckSettingsButton) {
+    deckSettingsButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleDeckSettingsPanel();
+    });
+}
+
+if (deckSettingsPanel) {
+    deckSettingsPanel.addEventListener('click', (event) => {
+        event.stopPropagation();
+    });
+}
+
+if (deckCreateButton) {
+    deckCreateButton.addEventListener('click', () => {
+        handleCreateDeck();
+        closeDeckSettingsPanel();
+    });
+}
+
+if (deckDeleteButton) {
+    deckDeleteButton.addEventListener('click', () => {
+        handleDeleteDeck();
+        closeDeckSettingsPanel();
+    });
+}
+
+if (deckModifyToggleBtn) {
+    deckModifyToggleBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setDeckModifyMode(!deckModifyMode);
+    });
+}
+
+if (deckDownloadButton) {
+    deckDownloadButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleDownloadDecks();
+    });
+}
+
+if (deckUploadButton) {
+    deckUploadButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleUploadDecks();
+    });
+}
+
+if (deckAddAreaButton) {
+    deckAddAreaButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleAddDeckArea();
+    });
 }
 
 document.addEventListener('click', handleGlobalPointerDown);
