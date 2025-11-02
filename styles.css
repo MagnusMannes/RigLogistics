@@ -296,6 +296,25 @@ button.icon-button {
     overflow: hidden;
 }
 
+.planning-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.planning-actions button {
+    flex: 1;
+    white-space: nowrap;
+}
+
+.planning-actions .ghost.danger {
+    color: #b91c1c;
+    border-color: rgba(248, 113, 113, 0.45);
+}
+
+.planning-actions .ghost.danger:hover:not(:disabled) {
+    background: rgba(248, 113, 113, 0.18);
+}
+
 .planning-job-list {
     display: flex;
     flex-direction: column;
