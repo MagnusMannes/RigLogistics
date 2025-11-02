@@ -23,12 +23,15 @@ const sortDateBtn = document.getElementById('sort-date');
 const workspaceContainer = document.getElementById('workspace-container');
 const workspaceContent = document.getElementById('workspace-content');
 const createItemBtn = document.getElementById('create-item');
-const settingsButton = document.getElementById('settings-button');
-const settingsMenu = document.getElementById('settings-menu');
 const addDeckAreaBtn = document.getElementById('add-deck-area');
+const toolsButton = document.getElementById('tools-button');
+const toolsMenu = document.getElementById('tools-menu');
+const measureToggleBtn = document.getElementById('toggle-measure-mode');
+const togglePlanningModeBtn = document.getElementById('toggle-planning-mode');
+const planningIndicator = document.getElementById('planning-indicator');
+const workspaceHeader = document.querySelector('.workspace-header');
 const contextMenu = document.getElementById('context-menu');
 const zoomValueEl = document.getElementById('zoom-value');
-const measureButton = document.getElementById('measure-button');
 const measurementInstructions = document.getElementById('measurement-instructions');
 
 const inputWidth = document.getElementById('input-width');
@@ -40,10 +43,6 @@ const measurementOverlay = document.createElement('div');
 measurementOverlay.id = 'measurement-overlay';
 measurementOverlay.className = 'measurement-overlay';
 workspaceContent.appendChild(measurementOverlay);
-
-if (measureButton) {
-    measureButton.setAttribute('aria-pressed', 'false');
-}
 
 inputWidth.value = DEFAULT_ITEM_WIDTH_METERS.toString();
 inputHeight.value = DEFAULT_ITEM_HEIGHT_METERS.toString();
@@ -65,6 +64,7 @@ const measurementState = {
     points: [],
 };
 let modifyDialogState = null;
+let planningModeActive = false;
 
 function updateMeasurementOverlayScale() {
     const measurementScale = 1 / workspaceState.scale;
@@ -88,6 +88,15 @@ function ensureMeasurementOverlay() {
     if (!measurementOverlay.isConnected) {
         workspaceContent.appendChild(measurementOverlay);
     }
+}
+
+function updateMeasureToggleButton() {
+    if (!measureToggleBtn) {
+        return;
+    }
+    measureToggleBtn.textContent = measurementState.active ? 'Leave measure mode' : 'Enter measure mode';
+    measureToggleBtn.classList.toggle('active', measurementState.active);
+    measureToggleBtn.setAttribute('aria-pressed', measurementState.active ? 'true' : 'false');
 }
 
 function getWorkspacePointFromEvent(event) {
@@ -162,10 +171,7 @@ function activateMeasureMode() {
     measurementState.active = true;
     ensureMeasurementOverlay();
     clearMeasurements();
-    if (measureButton) {
-        measureButton.classList.add('active');
-        measureButton.setAttribute('aria-pressed', 'true');
-    }
+    updateMeasureToggleButton();
     workspaceContainer.classList.add('measure-mode');
     if (measurementInstructions) {
         measurementInstructions.hidden = false;
@@ -180,10 +186,7 @@ function deactivateMeasureMode() {
         return;
     }
     measurementState.active = false;
-    if (measureButton) {
-        measureButton.classList.remove('active');
-        measureButton.setAttribute('aria-pressed', 'false');
-    }
+    updateMeasureToggleButton();
     workspaceContainer.classList.remove('measure-mode');
     if (measurementInstructions) {
         measurementInstructions.classList.remove('visible');
@@ -223,6 +226,44 @@ function handleMeasurePointerDown(event) {
 function handleMeasureKeydown(event) {
     if (event.key === 'Escape') {
         deactivateMeasureMode();
+    }
+}
+
+function updatePlanningModeUI() {
+    if (workspaceHeader) {
+        workspaceHeader.classList.toggle('planning-mode', planningModeActive);
+    }
+    if (planningIndicator) {
+        planningIndicator.hidden = !planningModeActive;
+    }
+    if (togglePlanningModeBtn) {
+        togglePlanningModeBtn.textContent = planningModeActive ? 'Leave planning mode' : 'Enter planning mode';
+        togglePlanningModeBtn.classList.toggle('active', planningModeActive);
+        togglePlanningModeBtn.setAttribute('aria-pressed', planningModeActive ? 'true' : 'false');
+    }
+}
+
+function enterPlanningMode() {
+    if (planningModeActive) {
+        return;
+    }
+    planningModeActive = true;
+    updatePlanningModeUI();
+}
+
+function leavePlanningMode() {
+    if (!planningModeActive) {
+        return;
+    }
+    planningModeActive = false;
+    updatePlanningModeUI();
+}
+
+function togglePlanningMode() {
+    if (planningModeActive) {
+        leavePlanningMode();
+    } else {
+        enterPlanningMode();
     }
 }
 
@@ -588,6 +629,7 @@ function renderDeckList() {
 function selectDeck(deck) {
     currentDeck = deck;
     deactivateMeasureMode();
+    leavePlanningMode();
     localStorage.setItem(selectedDeckKey, deck);
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
@@ -600,12 +642,13 @@ function selectDeck(deck) {
     refreshItemList();
     workspaceState.scale = BASE_SCALE;
     applyWorkspaceTransform();
-    closeSettingsMenu();
+    closeToolsMenu();
 }
 
 function goBackToSelection() {
     currentDeck = null;
     deactivateMeasureMode();
+    leavePlanningMode();
     localStorage.removeItem(selectedDeckKey);
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
@@ -1245,12 +1288,28 @@ function toggleSidebar() {
     historySidebar.classList.toggle('hidden');
 }
 
-function openSettingsMenu() {
-    settingsMenu.classList.add('open');
+function toggleToolsMenu() {
+    if (!toolsMenu) {
+        return;
+    }
+    const shouldOpen = !toolsMenu.classList.contains('open');
+    toolsMenu.classList.toggle('open', shouldOpen);
+    if (toolsButton) {
+        toolsButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    }
+    if (shouldOpen) {
+        updateMeasureToggleButton();
+        updatePlanningModeUI();
+    }
 }
 
-function closeSettingsMenu() {
-    settingsMenu.classList.remove('open');
+function closeToolsMenu() {
+    if (toolsMenu) {
+        toolsMenu.classList.remove('open');
+    }
+    if (toolsButton) {
+        toolsButton.setAttribute('aria-expanded', 'false');
+    }
 }
 
 function openContextMenu(x, y) {
@@ -1395,7 +1454,7 @@ function handleAddDeckArea() {
         color: '#ffffff',
         type: 'deck-area',
     });
-    closeSettingsMenu();
+    closeToolsMenu();
 }
 
 function initializeDeckSelection() {
@@ -1484,7 +1543,7 @@ function setupWorkspaceInteractions() {
 }
 
 function handleGlobalPointerDown() {
-    closeSettingsMenu();
+    closeToolsMenu();
     closeContextMenu();
 }
 
@@ -1501,16 +1560,24 @@ function setHistorySortMode(mode) {
     refreshItemList();
 }
 
-settingsButton.addEventListener('click', (event) => {
-    event.stopPropagation();
-    settingsMenu.classList.toggle('open');
-});
+if (toolsButton) {
+    toolsButton.setAttribute('aria-haspopup', 'true');
+    toolsButton.setAttribute('aria-expanded', 'false');
+    toolsButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleToolsMenu();
+    });
+}
 
-settingsMenu.addEventListener('click', (event) => {
-    event.stopPropagation();
-});
+if (toolsMenu) {
+    toolsMenu.addEventListener('click', (event) => {
+        event.stopPropagation();
+    });
+}
 
-addDeckAreaBtn.addEventListener('click', handleAddDeckArea);
+if (addDeckAreaBtn) {
+    addDeckAreaBtn.addEventListener('click', handleAddDeckArea);
+}
 
 document.addEventListener('click', handleGlobalPointerDown);
 
@@ -1531,9 +1598,17 @@ document.addEventListener('contextmenu', (event) => {
     }
 });
 
-if (measureButton) {
-    measureButton.addEventListener('click', () => {
+if (measureToggleBtn) {
+    measureToggleBtn.addEventListener('click', () => {
         toggleMeasureMode();
+        closeToolsMenu();
+    });
+}
+
+if (togglePlanningModeBtn) {
+    togglePlanningModeBtn.addEventListener('click', () => {
+        togglePlanningMode();
+        closeToolsMenu();
     });
 }
 
@@ -1586,6 +1661,9 @@ historyList.addEventListener('click', (event) => {
         .join('\n');
     alert(historyText);
 });
+
+updateMeasureToggleButton();
+updatePlanningModeUI();
 
 refreshItemList();
 

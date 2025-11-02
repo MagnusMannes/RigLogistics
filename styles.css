@@ -197,6 +197,12 @@ button.icon-button {
     flex-wrap: wrap;
 }
 
+.right-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
 .nav-controls {
     display: flex;
     flex-direction: column;
@@ -210,6 +216,16 @@ button.icon-button {
     gap: 0.65rem;
     flex-wrap: wrap;
     align-items: flex-end;
+}
+
+.tools-menu {
+    position: relative;
+    display: flex;
+}
+
+.tools-menu .menu {
+    top: calc(100% + 0.4rem);
+    right: 0;
 }
 
 .toolbar label {
@@ -637,6 +653,11 @@ button.icon-button {
     transition: background 0.2s ease, transform 0.2s ease;
 }
 
+.menu button.active {
+    background: rgba(59, 130, 246, 0.22);
+    border: 1px solid rgba(59, 130, 246, 0.32);
+}
+
 .menu button:hover {
     background: rgba(59, 130, 246, 0.18);
     transform: translateY(-1px);
@@ -648,6 +669,30 @@ button.icon-button {
 
 .menu button.danger:hover {
     background: rgba(248, 113, 113, 0.22);
+}
+
+.workspace-header.planning-mode {
+    background: linear-gradient(120deg, rgba(250, 204, 21, 0.26), rgba(248, 250, 252, 0.96));
+    border-bottom-color: rgba(250, 204, 21, 0.35);
+    box-shadow: 0 12px 36px rgba(250, 204, 21, 0.25);
+}
+
+.planning-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 600;
+    color: #854d0e;
+    background: rgba(250, 204, 21, 0.24);
+    border: 1px solid rgba(202, 138, 4, 0.4);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.planning-indicator[hidden] {
+    display: none;
 }
 
 .context-menu {
