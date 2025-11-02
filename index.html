@@ -47,18 +47,20 @@
                             Color
                             <input type="color" id="input-color" value="#3a7afe" />
                         </label>
-                        <button id="measure-button" class="ghost measure-toggle" type="button">Measure</button>
                         <button id="create-item" class="primary">Create item</button>
+                        <div class="tools-menu" id="tools-menu-container">
+                            <button id="tools-button" class="ghost" type="button">Tools</button>
+                            <div id="tools-menu" class="menu" role="menu">
+                                <button id="toggle-measure-mode" role="menuitem" type="button">Enter measure mode</button>
+                                <button id="add-deck-area" role="menuitem" type="button">Add deck</button>
+                                <button id="toggle-planning-mode" role="menuitem" type="button">Enter planning mode</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="right-controls">
                     <div class="zoom-indicator">Zoom: <span id="zoom-value">100%</span></div>
-                    <button id="settings-button" class="icon-button" aria-label="Settings">
-                        ⚙️
-                    </button>
-                    <div id="settings-menu" class="menu" role="menu">
-                        <button id="add-deck-area" role="menuitem">Add deck</button>
-                    </div>
+                    <span id="planning-indicator" class="planning-indicator" hidden>Planning mode</span>
                 </div>
             </header>
 
