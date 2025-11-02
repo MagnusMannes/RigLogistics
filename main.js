@@ -83,6 +83,7 @@ const planningState = {
     active: false,
     activeJobIds: new Set(),
     showCurrentDeck: true,
+    lockCurrentDeck: false,
 };
 let deckModifyMode = false;
 
@@ -541,11 +542,22 @@ function updatePlanningStateUI() {
         planningSidebar.classList.toggle('disabled', !planningActive || !hasDeck);
     }
     if (planningCurrentDeckToggle) {
-        const canToggle = planningActive && hasDeck;
-        const showCurrentDeck = planningState.showCurrentDeck && canToggle;
+        const lockCurrentDeck = planningActive && hasDeck && planningState.lockCurrentDeck;
+        if (lockCurrentDeck && !planningState.showCurrentDeck) {
+            planningState.showCurrentDeck = true;
+        }
+        const canToggle = planningActive && hasDeck && !lockCurrentDeck;
+        const showCurrentDeck = planningState.showCurrentDeck && planningActive && hasDeck;
         planningCurrentDeckToggle.disabled = !canToggle;
+        planningCurrentDeckToggle.setAttribute('aria-disabled', canToggle ? 'false' : 'true');
         planningCurrentDeckToggle.setAttribute('aria-pressed', showCurrentDeck ? 'true' : 'false');
         planningCurrentDeckToggle.classList.toggle('active', showCurrentDeck);
+        planningCurrentDeckToggle.classList.toggle('locked', lockCurrentDeck);
+        if (lockCurrentDeck) {
+            planningCurrentDeckToggle.title = 'Current deck remains primary while planning mode is active.';
+        } else {
+            planningCurrentDeckToggle.removeAttribute('title');
+        }
     }
     if (togglePlanningModeBtn) {
         togglePlanningModeBtn.textContent = planningActive ? 'Exit planning mode' : 'Enter planning mode';
@@ -553,7 +565,6 @@ function updatePlanningStateUI() {
         togglePlanningModeBtn.classList.toggle('active', planningActive);
     }
     if (workspaceContainer) {
-        workspaceContainer.classList.toggle('planning-locked', planningActive);
         workspaceContainer.classList.toggle(
             'planning-hide-current',
             planningActive && !planningState.showCurrentDeck
@@ -576,6 +587,7 @@ function enterPlanningMode() {
     }
     planningState.active = true;
     planningState.showCurrentDeck = true;
+    planningState.lockCurrentDeck = true;
     renderPlanningJobs();
     closeToolsMenu();
 }
@@ -587,6 +599,7 @@ function exitPlanningMode() {
     }
     planningState.active = false;
     planningState.showCurrentDeck = true;
+    planningState.lockCurrentDeck = false;
     renderPlanningJobs();
     closeToolsMenu();
 }
@@ -657,6 +670,7 @@ function renderPlanningJobs() {
     if (!currentDeck) {
         planningState.activeJobIds.clear();
         planningState.showCurrentDeck = true;
+        planningState.lockCurrentDeck = false;
         planningJobsList.innerHTML = '';
         clearPlanningOverlays();
         if (planningOverlayHost.isConnected) {
@@ -681,6 +695,7 @@ function renderPlanningJobs() {
     if (!jobs.length) {
         planningState.activeJobIds.clear();
         planningState.showCurrentDeck = true;
+        planningState.lockCurrentDeck = false;
         clearPlanningOverlays();
         if (planningOverlayHost.isConnected) {
             planningOverlayHost.remove();
@@ -760,6 +775,9 @@ function handlePlanningCurrentDeckToggle() {
         return;
     }
     if (!currentDeck) {
+        return;
+    }
+    if (planningState.lockCurrentDeck) {
         return;
     }
     planningState.showCurrentDeck = !planningState.showCurrentDeck;
@@ -1365,6 +1383,7 @@ function selectDeck(deck) {
     deactivateMeasureMode();
     planningState.activeJobIds.clear();
     planningState.showCurrentDeck = true;
+    planningState.lockCurrentDeck = false;
     localStorage.setItem(selectedDeckKey, currentDeck.name);
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
@@ -1388,6 +1407,7 @@ function goBackToSelection() {
     deactivateMeasureMode();
     planningState.activeJobIds.clear();
     planningState.showCurrentDeck = true;
+    planningState.lockCurrentDeck = false;
     localStorage.removeItem(selectedDeckKey);
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
@@ -1467,10 +1487,6 @@ function setupItemInteractions(element, resizeHandle) {
 
     element.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) {
-            return;
-        }
-
-        if (planningState.active) {
             return;
         }
 
