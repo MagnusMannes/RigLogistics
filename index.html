@@ -52,9 +52,8 @@
                             <button id="tools-button" class="ghost" type="button">Tools</button>
                             <div id="tools-menu" class="menu" role="menu">
                                 <button id="toggle-measure-mode" role="menuitem" type="button">Enter measure mode</button>
+                                <button id="toggle-planning-mode" role="menuitem" type="button">Enter planning mode</button>
                                 <button id="add-deck-area" role="menuitem" type="button">Add deck</button>
-                                <button id="create-planning-job" role="menuitem" type="button">Create planning job…</button>
-                                <button id="delete-planning-job" role="menuitem" type="button">Delete planning job…</button>
                             </div>
                         </div>
                     </div>
@@ -81,7 +80,7 @@
                     <ul id="history-list"></ul>
                 </aside>
 
-                <aside id="planning-sidebar" class="sidebar planning-sidebar">
+                <aside id="planning-sidebar" class="sidebar planning-sidebar hidden">
                     <h2>Planning</h2>
                     <div class="planning-section" aria-live="polite">
                         <button
@@ -92,6 +91,14 @@
                         >
                             Current Deck
                         </button>
+                        <div class="planning-actions">
+                            <button id="create-planning-job" class="primary" type="button">
+                                Add planning deck
+                            </button>
+                            <button id="delete-planning-job" class="ghost danger" type="button">
+                                Delete planning deck…
+                            </button>
+                        </div>
                         <div id="planning-job-list" class="planning-job-list"></div>
                     </div>
                 </aside>

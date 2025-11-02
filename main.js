@@ -27,6 +27,7 @@ const addDeckAreaBtn = document.getElementById('add-deck-area');
 const toolsButton = document.getElementById('tools-button');
 const toolsMenu = document.getElementById('tools-menu');
 const measureToggleBtn = document.getElementById('toggle-measure-mode');
+const togglePlanningModeBtn = document.getElementById('toggle-planning-mode');
 const createPlanningJobBtn = document.getElementById('create-planning-job');
 const deletePlanningJobBtn = document.getElementById('delete-planning-job');
 const planningIndicator = document.getElementById('planning-indicator');
@@ -74,6 +75,7 @@ const measurementState = {
 };
 let modifyDialogState = null;
 const planningState = {
+    active: false,
     activeJobIds: new Set(),
 };
 
@@ -241,6 +243,9 @@ function handleMeasureKeydown(event) {
 }
 
 function ensurePlanningOverlayHost() {
+    if (!planningState.active) {
+        return;
+    }
     if (!planningOverlayHost.isConnected) {
         workspaceContent.appendChild(planningOverlayHost);
     }
@@ -402,26 +407,36 @@ function isColorDark(hex) {
 }
 
 function updatePlanningStateUI() {
+    const planningActive = planningState.active;
+    const hasDeck = Boolean(currentDeck);
     const hasActiveJobs = planningState.activeJobIds.size > 0;
     if (workspaceHeader) {
-        workspaceHeader.classList.toggle('planning-mode', hasActiveJobs);
+        workspaceHeader.classList.toggle('planning-mode', planningActive);
     }
     if (planningIndicator) {
-        planningIndicator.hidden = !hasActiveJobs;
+        planningIndicator.hidden = !planningActive;
     }
     if (planningSidebar) {
-        planningSidebar.classList.toggle('disabled', !currentDeck);
+        planningSidebar.classList.toggle('hidden', !planningActive);
+        planningSidebar.classList.toggle('disabled', !planningActive || !hasDeck);
     }
     if (planningCurrentDeckToggle) {
-        const showCurrentDeck = Boolean(currentDeck) && !hasActiveJobs;
+        const canToggle = planningActive && hasDeck;
+        const showCurrentDeck = canToggle && !hasActiveJobs;
+        planningCurrentDeckToggle.disabled = !canToggle;
         planningCurrentDeckToggle.setAttribute('aria-pressed', showCurrentDeck ? 'true' : 'false');
         planningCurrentDeckToggle.classList.toggle('active', showCurrentDeck);
-        planningCurrentDeckToggle.disabled = !currentDeck;
+    }
+    if (togglePlanningModeBtn) {
+        togglePlanningModeBtn.textContent = planningActive ? 'Exit planning mode' : 'Enter planning mode';
+        togglePlanningModeBtn.setAttribute('aria-pressed', planningActive ? 'true' : 'false');
+        togglePlanningModeBtn.classList.toggle('active', planningActive);
     }
 }
 
 function updatePlanningControlsState() {
-    const hasDeck = Boolean(currentDeck);
+    const planningActive = planningState.active;
+    const hasDeck = planningActive && Boolean(currentDeck);
     if (createPlanningJobBtn) {
         createPlanningJobBtn.disabled = !hasDeck;
     }
@@ -431,7 +446,42 @@ function updatePlanningControlsState() {
     }
 }
 
+function enterPlanningMode() {
+    if (planningState.active) {
+        closeToolsMenu();
+        return;
+    }
+    planningState.active = true;
+    renderPlanningJobs();
+    closeToolsMenu();
+}
+
+function exitPlanningMode() {
+    if (!planningState.active) {
+        closeToolsMenu();
+        return;
+    }
+    planningState.active = false;
+    renderPlanningJobs();
+    closeToolsMenu();
+}
+
+function togglePlanningMode() {
+    if (planningState.active) {
+        exitPlanningMode();
+    } else {
+        enterPlanningMode();
+    }
+}
+
 function renderPlanningJobOverlay(job) {
+    if (!planningState.active) {
+        const existing = planningOverlayHost.querySelector(`[data-job-id="${job.id}"]`);
+        if (existing) {
+            existing.remove();
+        }
+        return;
+    }
     ensurePlanningOverlayHost();
     let overlay = planningOverlayHost.querySelector(`[data-job-id="${job.id}"]`);
     if (!overlay) {
@@ -472,6 +522,13 @@ function renderPlanningJobs() {
     if (!planningJobsList) {
         return;
     }
+    const planningActive = planningState.active;
+    if (!planningActive) {
+        clearPlanningOverlays();
+        if (planningOverlayHost.isConnected) {
+            planningOverlayHost.remove();
+        }
+    }
     if (!currentDeck) {
         planningState.activeJobIds.clear();
         planningJobsList.innerHTML = '';
@@ -487,7 +544,6 @@ function renderPlanningJobs() {
         updatePlanningStateUI();
         return;
     }
-    ensurePlanningOverlayHost();
     const jobs = getCurrentDeckJobs();
     const validIds = new Set(jobs.map((job) => job.id));
     Array.from(planningState.activeJobIds).forEach((jobId) => {
@@ -499,13 +555,19 @@ function renderPlanningJobs() {
     if (!jobs.length) {
         planningState.activeJobIds.clear();
         clearPlanningOverlays();
+        if (planningOverlayHost.isConnected) {
+            planningOverlayHost.remove();
+        }
         const emptyMessage = document.createElement('p');
         emptyMessage.className = 'list-empty';
-        emptyMessage.textContent = 'No planning jobs yet.';
+        emptyMessage.textContent = 'No planning decks yet.';
         planningJobsList.appendChild(emptyMessage);
         updatePlanningControlsState();
         updatePlanningStateUI();
         return;
+    }
+    if (planningActive) {
+        ensurePlanningOverlayHost();
     }
     jobs.forEach((job) => {
         const entry = document.createElement('div');
@@ -517,21 +579,29 @@ function renderPlanningJobs() {
         const isActive = planningState.activeJobIds.has(job.id);
         toggle.setAttribute('aria-pressed', isActive ? 'true' : 'false');
         toggle.classList.toggle('active', isActive);
+        toggle.disabled = !planningActive;
         toggle.addEventListener('click', () => togglePlanningJob(job.id));
         entry.appendChild(toggle);
         planningJobsList.appendChild(entry);
-        renderPlanningJobOverlay(job);
-    });
-    planningOverlayHost.querySelectorAll('[data-job-id]').forEach((overlay) => {
-        if (!validIds.has(overlay.dataset.jobId)) {
-            overlay.remove();
+        if (planningActive) {
+            renderPlanningJobOverlay(job);
         }
     });
+    if (planningActive) {
+        planningOverlayHost.querySelectorAll('[data-job-id]').forEach((overlay) => {
+            if (!validIds.has(overlay.dataset.jobId)) {
+                overlay.remove();
+            }
+        });
+    }
     updatePlanningControlsState();
     updatePlanningStateUI();
 }
 
 function togglePlanningJob(jobId) {
+    if (!planningState.active) {
+        return;
+    }
     if (!currentDeck) {
         return;
     }
@@ -548,6 +618,9 @@ function togglePlanningJob(jobId) {
 }
 
 function handlePlanningCurrentDeckToggle() {
+    if (!planningState.active) {
+        return;
+    }
     if (!currentDeck) {
         return;
     }
@@ -593,17 +666,21 @@ function serializeWorkspaceElements() {
 }
 
 function handleCreatePlanningJob() {
-    if (!currentDeck) {
-        alert('Select a deck before creating a planning job.');
+    if (!planningState.active) {
+        alert('Enter planning mode before creating a planning deck.');
         return;
     }
-    const label = prompt('Name for the new planning job?');
+    if (!currentDeck) {
+        alert('Select a deck before creating a planning deck.');
+        return;
+    }
+    const label = prompt('Name for the new planning deck?');
     if (label === null) {
         return;
     }
     const trimmed = label.trim();
     if (!trimmed) {
-        alert('Please provide a name for the planning job.');
+        alert('Please provide a name for the planning deck.');
         return;
     }
     const job = {
@@ -617,22 +694,25 @@ function handleCreatePlanningJob() {
     planningState.activeJobIds.add(job.id);
     saveDecks();
     renderPlanningJobs();
-    closeToolsMenu();
 }
 
 function handleDeletePlanningJob() {
+    if (!planningState.active) {
+        alert('Enter planning mode before deleting planning decks.');
+        return;
+    }
     if (!currentDeck) {
-        alert('Select a deck before deleting planning jobs.');
+        alert('Select a deck before deleting planning decks.');
         return;
     }
     const jobs = getCurrentDeckJobs();
     if (!jobs.length) {
-        alert('There are no planning jobs to delete.');
+        alert('There are no planning decks to delete.');
         return;
     }
     if (jobs.length === 1) {
         const [job] = jobs;
-        const shouldDelete = confirm(`Delete planning job "${job.label}"?`);
+        const shouldDelete = confirm(`Delete planning deck "${job.label}"?`);
         if (!shouldDelete) {
             return;
         }
@@ -640,13 +720,12 @@ function handleDeletePlanningJob() {
         planningState.activeJobIds.clear();
         saveDecks();
         renderPlanningJobs();
-        closeToolsMenu();
         return;
     }
     const options = jobs
         .map((job, index) => `${index + 1}. ${job.label}`)
         .join('\n');
-    const input = prompt(`Enter the number of the planning job to delete:\n${options}`);
+    const input = prompt(`Enter the number of the planning deck to delete:\n${options}`);
     if (!input) {
         return;
     }
@@ -659,7 +738,6 @@ function handleDeletePlanningJob() {
     planningState.activeJobIds.delete(removed.id);
     saveDecks();
     renderPlanningJobs();
-    closeToolsMenu();
 }
 
 const workspaceState = {
@@ -2035,6 +2113,12 @@ if (measureToggleBtn) {
     measureToggleBtn.addEventListener('click', () => {
         toggleMeasureMode();
         closeToolsMenu();
+    });
+}
+
+if (togglePlanningModeBtn) {
+    togglePlanningModeBtn.addEventListener('click', () => {
+        togglePlanningMode();
     });
 }
 
