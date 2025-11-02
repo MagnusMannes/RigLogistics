@@ -569,6 +569,11 @@ button.icon-button {
     visibility: hidden;
 }
 
+.workspace-container.planning-mode-active .workspace-content > .item,
+.workspace-container.planning-mode-active .workspace-content > .deck-area {
+    pointer-events: none;
+}
+
 .workspace-content {
     position: absolute;
     top: 50%;
@@ -588,6 +593,25 @@ button.icon-button {
     inset: 0;
     pointer-events: none;
     z-index: 5;
+}
+
+.planning-editing-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+}
+
+.planning-editing-layer .item {
+    pointer-events: none;
+}
+
+.workspace-container.planning-mode-active .planning-editing-layer .item {
+    pointer-events: auto;
+}
+
+.planning-edit-item {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
 }
 
 .planning-overlay {
@@ -633,6 +657,14 @@ button.icon-button {
 
 .planning-overlay-item .overlay-label {
     pointer-events: none;
+}
+
+.planning-job-toggle.editing::after {
+    content: ' · editing';
+    margin-left: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--primary);
+    letter-spacing: 0.01em;
 }
 
 .item,
