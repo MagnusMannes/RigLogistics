@@ -22,6 +22,9 @@
 
         <section id="workspace-view" class="view">
             <header class="workspace-header">
+                <div id="deck-modify-notice" class="deck-modify-notice" hidden>
+                    Warning: modify deck mode
+                </div>
                 <div class="left-controls">
                     <div class="nav-controls">
                         <button id="back-button" class="ghost">
@@ -53,7 +56,34 @@
                             <div id="tools-menu" class="menu" role="menu">
                                 <button id="toggle-measure-mode" role="menuitem" type="button">Enter measure mode</button>
                                 <button id="toggle-planning-mode" role="menuitem" type="button">Enter planning mode</button>
-                                <button id="add-deck-area" role="menuitem" type="button">Add deck</button>
+                                <button
+                                    id="deck-settings-button"
+                                    role="menuitem"
+                                    type="button"
+                                    aria-expanded="false"
+                                    aria-controls="deck-settings-panel"
+                                >
+                                    Deck settings
+                                </button>
+                                <div
+                                    id="deck-settings-panel"
+                                    class="deck-settings-panel"
+                                    role="group"
+                                    aria-hidden="true"
+                                >
+                                    <div class="deck-settings-section">
+                                        <button id="deck-create-button" type="button">Add deck…</button>
+                                        <button id="deck-delete-button" type="button">Delete deck…</button>
+                                        <button id="deck-modify-toggle" type="button">Enter modify mode</button>
+                                    </div>
+                                    <div class="deck-settings-section">
+                                        <button id="deck-add-area-button" type="button">Add deck area</button>
+                                    </div>
+                                    <div class="deck-settings-section">
+                                        <button id="deck-download-button" type="button" disabled>Download decks</button>
+                                        <button id="deck-upload-button" type="button" disabled>Upload decks</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

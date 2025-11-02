@@ -824,10 +824,118 @@ button.icon-button {
     background: rgba(248, 113, 113, 0.22);
 }
 
+.deck-settings-panel {
+    display: none;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.45rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.deck-settings-panel.open {
+    display: flex;
+}
+
+.deck-settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.deck-settings-section + .deck-settings-section {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.deck-settings-panel button[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.deck-modify-notice {
+    display: none;
+    width: 100%;
+    text-align: center;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+    order: -1;
+    align-self: stretch;
+}
+
+.workspace-header.modify-mode {
+    background: #1d4ed8;
+    color: #fff;
+    border-bottom-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 12px 36px rgba(29, 78, 216, 0.35);
+}
+
+.workspace-header.modify-mode .deck-modify-notice {
+    display: block;
+}
+
+.workspace-header.modify-mode button.ghost,
+.workspace-header.modify-mode button.icon-button {
+    border-color: rgba(255, 255, 255, 0.35);
+    color: #fff;
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.workspace-header.modify-mode button.ghost:hover,
+.workspace-header.modify-mode button.icon-button:hover {
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.workspace-header.modify-mode .toolbar label {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.workspace-header.modify-mode .toolbar input[type="number"],
+.workspace-header.modify-mode .toolbar input[type="text"],
+.workspace-header.modify-mode .toolbar input[type="color"] {
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #fff;
+}
+
+.workspace-header.modify-mode #tools-menu {
+    background: rgba(15, 23, 42, 0.96);
+    color: #f8fafc;
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.workspace-header.modify-mode #tools-menu button {
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+}
+
+.workspace-header.modify-mode #tools-menu button:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.workspace-header.modify-mode #tools-menu .deck-settings-panel {
+    border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+.workspace-header.modify-mode #tools-menu .deck-settings-section + .deck-settings-section {
+    border-top-color: rgba(255, 255, 255, 0.2);
+}
+
 .workspace-header.planning-mode {
     background: linear-gradient(120deg, rgba(250, 204, 21, 0.26), rgba(248, 250, 252, 0.96));
     border-bottom-color: rgba(250, 204, 21, 0.35);
     box-shadow: 0 12px 36px rgba(250, 204, 21, 0.25);
+}
+
+.workspace-header.modify-mode.planning-mode {
+    background: #1d4ed8;
+    border-bottom-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 12px 36px rgba(29, 78, 216, 0.35);
+    color: #fff;
 }
 
 .planning-indicator {
