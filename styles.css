@@ -277,6 +277,88 @@ button.icon-button {
         margin 0.3s ease, max-height 0.3s ease;
 }
 
+.planning-sidebar {
+    border-left: 1px solid var(--panel-light-border);
+    border-right: none;
+    gap: 0.75rem;
+}
+
+.planning-sidebar.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.planning-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    flex: 1;
+    overflow: hidden;
+}
+
+.planning-job-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+.planning-job-list .list-empty {
+    padding: 0.5rem 0;
+}
+
+.planning-toggle {
+    justify-content: flex-start;
+    width: 100%;
+    gap: 0.5rem;
+    font-weight: 600;
+    text-align: left;
+}
+
+.planning-toggle::before {
+    content: '◉';
+    font-size: 0.8rem;
+    opacity: 0.6;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.planning-toggle.active::before {
+    content: '⬤';
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.planning-toggle.active {
+    background: rgba(59, 130, 246, 0.18);
+    border-color: rgba(59, 130, 246, 0.45);
+    color: #1e3a8a;
+}
+
+.planning-toggle:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.planning-job-entry {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.planning-job-entry .planning-job-toggle {
+    flex: 1;
+}
+
+.planning-job-label {
+    flex: 1;
+}
+
+.planning-job-meta {
+    font-size: 0.75rem;
+    color: var(--panel-light-muted);
+}
+
 .sidebar.hidden {
     opacity: 0;
     width: 0;
@@ -429,6 +511,58 @@ button.icon-button {
     background-size: 60px 60px;
     border-radius: 40px;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.planning-overlays {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.planning-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.planning-overlay-item {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: 0 0;
+    border-radius: 0;
+    border: 1px dashed rgba(14, 165, 233, 0.6);
+    background: rgba(14, 165, 233, 0.2);
+    color: #0f172a;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: 0.01em;
+    padding: 0.35rem;
+    box-shadow: 0 10px 25px rgba(14, 165, 233, 0.2);
+    font-size: 1.4rem;
+    white-space: normal;
+}
+
+.planning-overlay-item.item {
+    background: rgba(59, 130, 246, 0.28);
+    border-color: rgba(59, 130, 246, 0.55);
+    color: #0f172a;
+}
+
+.planning-overlay-item.item.has-dark-text {
+    color: #fff;
+}
+
+.planning-overlay-item.deck-area {
+    background: rgba(248, 250, 252, 0.45);
+    border-color: rgba(148, 163, 184, 0.6);
+    color: #1f2937;
+}
+
+.planning-overlay-item .overlay-label {
+    pointer-events: none;
 }
 
 .item,

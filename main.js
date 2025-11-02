@@ -27,8 +27,12 @@ const addDeckAreaBtn = document.getElementById('add-deck-area');
 const toolsButton = document.getElementById('tools-button');
 const toolsMenu = document.getElementById('tools-menu');
 const measureToggleBtn = document.getElementById('toggle-measure-mode');
-const togglePlanningModeBtn = document.getElementById('toggle-planning-mode');
+const createPlanningJobBtn = document.getElementById('create-planning-job');
+const deletePlanningJobBtn = document.getElementById('delete-planning-job');
 const planningIndicator = document.getElementById('planning-indicator');
+const planningSidebar = document.getElementById('planning-sidebar');
+const planningCurrentDeckToggle = document.getElementById('planning-current-deck');
+const planningJobsList = document.getElementById('planning-job-list');
 const workspaceHeader = document.querySelector('.workspace-header');
 const contextMenu = document.getElementById('context-menu');
 const zoomValueEl = document.getElementById('zoom-value');
@@ -43,6 +47,11 @@ const measurementOverlay = document.createElement('div');
 measurementOverlay.id = 'measurement-overlay';
 measurementOverlay.className = 'measurement-overlay';
 workspaceContent.appendChild(measurementOverlay);
+
+const planningOverlayHost = document.createElement('div');
+planningOverlayHost.id = 'planning-overlays';
+planningOverlayHost.className = 'planning-overlays';
+workspaceContent.appendChild(planningOverlayHost);
 
 inputWidth.value = DEFAULT_ITEM_WIDTH_METERS.toString();
 inputHeight.value = DEFAULT_ITEM_HEIGHT_METERS.toString();
@@ -64,7 +73,9 @@ const measurementState = {
     points: [],
 };
 let modifyDialogState = null;
-let planningModeActive = false;
+const planningState = {
+    activeJobIds: new Set(),
+};
 
 function updateMeasurementOverlayScale() {
     const measurementScale = 1 / workspaceState.scale;
@@ -229,42 +240,426 @@ function handleMeasureKeydown(event) {
     }
 }
 
-function updatePlanningModeUI() {
+function ensurePlanningOverlayHost() {
+    if (!planningOverlayHost.isConnected) {
+        workspaceContent.appendChild(planningOverlayHost);
+    }
+}
+
+function clearPlanningOverlays() {
+    planningOverlayHost.innerHTML = '';
+}
+
+function generateDeckId() {
+    return `deck-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function generatePlanningJobId() {
+    return `plan-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createDeckRecord(name, { id, jobs } = {}) {
+    return {
+        id: typeof id === 'string' && id.trim() ? id : generateDeckId(),
+        name: typeof name === 'string' && name.trim() ? name.trim() : 'Deck',
+        jobs: Array.isArray(jobs) ? jobs.map((job) => normalizePlanningJob(job)) : [],
+    };
+}
+
+function normalizePlanningItem(item) {
+    if (!item || typeof item !== 'object') {
+        return null;
+    }
+    const type = item.type === 'deck-area' ? 'deck-area' : 'item';
+    const label = typeof item.label === 'string' ? item.label : '';
+    const width = Number.parseFloat(item.width);
+    const height = Number.parseFloat(item.height);
+    const x = Number.parseFloat(item.x);
+    const y = Number.parseFloat(item.y);
+    const rotation = Number.parseFloat(item.rotation);
+    const normalized = {
+        type,
+        label,
+        width: Number.isFinite(width) ? width : DEFAULT_ITEM_WIDTH_METERS,
+        height: Number.isFinite(height) ? height : DEFAULT_ITEM_HEIGHT_METERS,
+        x: Number.isFinite(x) ? x : 0,
+        y: Number.isFinite(y) ? y : 0,
+        rotation: Number.isFinite(rotation) ? rotation : 0,
+    };
+    if (type === 'item') {
+        normalized.color =
+            typeof item.color === 'string' && item.color.trim() ? item.color : '#3a7afe';
+    } else {
+        normalized.nameHidden = item.nameHidden === true || item.nameHidden === 'true';
+    }
+    return normalized;
+}
+
+function normalizePlanningJob(job) {
+    if (!job || typeof job !== 'object') {
+        return {
+            id: generatePlanningJobId(),
+            label: 'Planning job',
+            deck: { items: [] },
+        };
+    }
+    const id = typeof job.id === 'string' && job.id.trim() ? job.id : generatePlanningJobId();
+    const label = typeof job.label === 'string' && job.label.trim() ? job.label.trim() : 'Planning job';
+    const itemsSource = Array.isArray(job.deck?.items) ? job.deck.items : [];
+    const items = itemsSource
+        .map((item) => normalizePlanningItem(item))
+        .filter((value) => value !== null);
+    return {
+        id,
+        label,
+        deck: { items },
+    };
+}
+
+function normalizeDeckEntry(entry) {
+    if (typeof entry === 'string') {
+        return createDeckRecord(entry);
+    }
+    if (!entry || typeof entry !== 'object') {
+        return createDeckRecord('Deck');
+    }
+    return createDeckRecord(entry.name, { id: entry.id, jobs: entry.jobs });
+}
+
+function planningItemToSerializable(item) {
+    const result = {
+        type: item.type,
+        label: item.label,
+        width: item.width,
+        height: item.height,
+        x: item.x,
+        y: item.y,
+        rotation: item.rotation,
+    };
+    if (item.type === 'item') {
+        result.color = item.color ?? '#3a7afe';
+    } else if (item.type === 'deck-area') {
+        result.nameHidden = Boolean(item.nameHidden);
+    }
+    return result;
+}
+
+function jobToSerializable(job) {
+    return {
+        id: job.id,
+        label: job.label,
+        deck: {
+            items: Array.isArray(job.deck?.items)
+                ? job.deck.items.map((item) => planningItemToSerializable(item))
+                : [],
+        },
+    };
+}
+
+function deckToSerializable(deck) {
+    return {
+        id: deck.id,
+        name: deck.name,
+        jobs: Array.isArray(deck.jobs) ? deck.jobs.map((job) => jobToSerializable(job)) : [],
+    };
+}
+
+function getCurrentDeckJobs() {
+    if (!currentDeck || !Array.isArray(currentDeck.jobs)) {
+        return [];
+    }
+    return currentDeck.jobs;
+}
+
+function isColorDark(hex) {
+    if (typeof hex !== 'string') {
+        return false;
+    }
+    let value = hex.trim();
+    if (!value) {
+        return false;
+    }
+    if (value.startsWith('#')) {
+        value = value.slice(1);
+    }
+    if (value.length === 3) {
+        value = value
+            .split('')
+            .map((char) => char + char)
+            .join('');
+    }
+    if (value.length !== 6) {
+        return false;
+    }
+    const r = parseInt(value.slice(0, 2), 16);
+    const g = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    if ([r, g, b].some((component) => Number.isNaN(component))) {
+        return false;
+    }
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance < 0.45;
+}
+
+function updatePlanningStateUI() {
+    const hasActiveJobs = planningState.activeJobIds.size > 0;
     if (workspaceHeader) {
-        workspaceHeader.classList.toggle('planning-mode', planningModeActive);
+        workspaceHeader.classList.toggle('planning-mode', hasActiveJobs);
     }
     if (planningIndicator) {
-        planningIndicator.hidden = !planningModeActive;
+        planningIndicator.hidden = !hasActiveJobs;
     }
-    if (togglePlanningModeBtn) {
-        togglePlanningModeBtn.textContent = planningModeActive ? 'Leave planning mode' : 'Enter planning mode';
-        togglePlanningModeBtn.classList.toggle('active', planningModeActive);
-        togglePlanningModeBtn.setAttribute('aria-pressed', planningModeActive ? 'true' : 'false');
+    if (planningSidebar) {
+        planningSidebar.classList.toggle('disabled', !currentDeck);
+    }
+    if (planningCurrentDeckToggle) {
+        const showCurrentDeck = Boolean(currentDeck) && !hasActiveJobs;
+        planningCurrentDeckToggle.setAttribute('aria-pressed', showCurrentDeck ? 'true' : 'false');
+        planningCurrentDeckToggle.classList.toggle('active', showCurrentDeck);
+        planningCurrentDeckToggle.disabled = !currentDeck;
     }
 }
 
-function enterPlanningMode() {
-    if (planningModeActive) {
+function updatePlanningControlsState() {
+    const hasDeck = Boolean(currentDeck);
+    if (createPlanningJobBtn) {
+        createPlanningJobBtn.disabled = !hasDeck;
+    }
+    if (deletePlanningJobBtn) {
+        const jobCount = hasDeck ? getCurrentDeckJobs().length : 0;
+        deletePlanningJobBtn.disabled = !hasDeck || jobCount === 0;
+    }
+}
+
+function renderPlanningJobOverlay(job) {
+    ensurePlanningOverlayHost();
+    let overlay = planningOverlayHost.querySelector(`[data-job-id="${job.id}"]`);
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'planning-overlay';
+        overlay.dataset.jobId = job.id;
+        planningOverlayHost.appendChild(overlay);
+    }
+    overlay.innerHTML = '';
+    overlay.hidden = !planningState.activeJobIds.has(job.id);
+    job.deck.items.forEach((item) => {
+        const element = document.createElement('div');
+        element.className = `planning-overlay-item ${item.type}`;
+        const widthPixels = metersToPixels(item.width);
+        const heightPixels = metersToPixels(item.height);
+        element.style.width = `${widthPixels}px`;
+        element.style.height = `${heightPixels}px`;
+        element.style.transform = `translate(${item.x}px, ${item.y}px) rotate(${item.rotation}deg)`;
+        if (item.type === 'item') {
+            const color = item.color || '#3a7afe';
+            element.style.background = color;
+            element.classList.toggle('has-dark-text', isColorDark(color));
+            element.textContent = item.label || 'Item';
+        } else {
+            const label = document.createElement('div');
+            label.className = 'overlay-label';
+            label.textContent = item.label || 'Deck area';
+            if (item.nameHidden) {
+                label.style.display = 'none';
+            }
+            element.appendChild(label);
+        }
+        overlay.appendChild(element);
+    });
+}
+
+function renderPlanningJobs() {
+    if (!planningJobsList) {
         return;
     }
-    planningModeActive = true;
-    updatePlanningModeUI();
-}
-
-function leavePlanningMode() {
-    if (!planningModeActive) {
+    if (!currentDeck) {
+        planningState.activeJobIds.clear();
+        planningJobsList.innerHTML = '';
+        clearPlanningOverlays();
+        if (planningOverlayHost.isConnected) {
+            planningOverlayHost.remove();
+        }
+        const emptyMessage = document.createElement('p');
+        emptyMessage.className = 'list-empty';
+        emptyMessage.textContent = 'Select a deck to start planning.';
+        planningJobsList.appendChild(emptyMessage);
+        updatePlanningControlsState();
+        updatePlanningStateUI();
         return;
     }
-    planningModeActive = false;
-    updatePlanningModeUI();
+    ensurePlanningOverlayHost();
+    const jobs = getCurrentDeckJobs();
+    const validIds = new Set(jobs.map((job) => job.id));
+    Array.from(planningState.activeJobIds).forEach((jobId) => {
+        if (!validIds.has(jobId)) {
+            planningState.activeJobIds.delete(jobId);
+        }
+    });
+    planningJobsList.innerHTML = '';
+    if (!jobs.length) {
+        planningState.activeJobIds.clear();
+        clearPlanningOverlays();
+        const emptyMessage = document.createElement('p');
+        emptyMessage.className = 'list-empty';
+        emptyMessage.textContent = 'No planning jobs yet.';
+        planningJobsList.appendChild(emptyMessage);
+        updatePlanningControlsState();
+        updatePlanningStateUI();
+        return;
+    }
+    jobs.forEach((job) => {
+        const entry = document.createElement('div');
+        entry.className = 'planning-job-entry';
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'ghost planning-toggle planning-job-toggle';
+        toggle.textContent = job.label;
+        const isActive = planningState.activeJobIds.has(job.id);
+        toggle.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        toggle.classList.toggle('active', isActive);
+        toggle.addEventListener('click', () => togglePlanningJob(job.id));
+        entry.appendChild(toggle);
+        planningJobsList.appendChild(entry);
+        renderPlanningJobOverlay(job);
+    });
+    planningOverlayHost.querySelectorAll('[data-job-id]').forEach((overlay) => {
+        if (!validIds.has(overlay.dataset.jobId)) {
+            overlay.remove();
+        }
+    });
+    updatePlanningControlsState();
+    updatePlanningStateUI();
 }
 
-function togglePlanningMode() {
-    if (planningModeActive) {
-        leavePlanningMode();
+function togglePlanningJob(jobId) {
+    if (!currentDeck) {
+        return;
+    }
+    const jobs = getCurrentDeckJobs();
+    if (!jobs.some((job) => job.id === jobId)) {
+        return;
+    }
+    if (planningState.activeJobIds.has(jobId)) {
+        planningState.activeJobIds.delete(jobId);
     } else {
-        enterPlanningMode();
+        planningState.activeJobIds.add(jobId);
     }
+    renderPlanningJobs();
+}
+
+function handlePlanningCurrentDeckToggle() {
+    if (!currentDeck) {
+        return;
+    }
+    if (!planningState.activeJobIds.size) {
+        return;
+    }
+    planningState.activeJobIds.clear();
+    renderPlanningJobs();
+}
+
+function serializeWorkspaceElements() {
+    const elements = Array.from(workspaceContent.querySelectorAll('.item, .deck-area'));
+    return elements.map((element) => {
+        const type = element.dataset.type === 'deck-area' ? 'deck-area' : 'item';
+        const label =
+            type === 'deck-area'
+                ? element.dataset.label || getItemLabel(element)
+                : getItemLabel(element);
+        const width = Number.parseFloat(element.dataset.width);
+        const height = Number.parseFloat(element.dataset.height);
+        const x = Number.parseFloat(element.dataset.x);
+        const y = Number.parseFloat(element.dataset.y);
+        const rotation = Number.parseFloat(element.dataset.rotation);
+        const itemData = {
+            type,
+            label,
+            width: Number.isFinite(width) ? width : DEFAULT_ITEM_WIDTH_METERS,
+            height: Number.isFinite(height) ? height : DEFAULT_ITEM_HEIGHT_METERS,
+            x: Number.isFinite(x) ? x : 0,
+            y: Number.isFinite(y) ? y : 0,
+            rotation: Number.isFinite(rotation) ? rotation : 0,
+        };
+        if (type === 'item') {
+            const color = rgbToHex(
+                getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe'
+            );
+            itemData.color = color;
+        } else {
+            itemData.nameHidden = element.dataset.nameHidden === 'true';
+        }
+        return itemData;
+    });
+}
+
+function handleCreatePlanningJob() {
+    if (!currentDeck) {
+        alert('Select a deck before creating a planning job.');
+        return;
+    }
+    const label = prompt('Name for the new planning job?');
+    if (label === null) {
+        return;
+    }
+    const trimmed = label.trim();
+    if (!trimmed) {
+        alert('Please provide a name for the planning job.');
+        return;
+    }
+    const job = {
+        id: generatePlanningJobId(),
+        label: trimmed,
+        deck: { items: serializeWorkspaceElements() },
+    };
+    const jobs = getCurrentDeckJobs();
+    jobs.push(job);
+    planningState.activeJobIds.clear();
+    planningState.activeJobIds.add(job.id);
+    saveDecks();
+    renderPlanningJobs();
+    closeToolsMenu();
+}
+
+function handleDeletePlanningJob() {
+    if (!currentDeck) {
+        alert('Select a deck before deleting planning jobs.');
+        return;
+    }
+    const jobs = getCurrentDeckJobs();
+    if (!jobs.length) {
+        alert('There are no planning jobs to delete.');
+        return;
+    }
+    if (jobs.length === 1) {
+        const [job] = jobs;
+        const shouldDelete = confirm(`Delete planning job "${job.label}"?`);
+        if (!shouldDelete) {
+            return;
+        }
+        jobs.splice(0, 1);
+        planningState.activeJobIds.clear();
+        saveDecks();
+        renderPlanningJobs();
+        closeToolsMenu();
+        return;
+    }
+    const options = jobs
+        .map((job, index) => `${index + 1}. ${job.label}`)
+        .join('\n');
+    const input = prompt(`Enter the number of the planning job to delete:\n${options}`);
+    if (!input) {
+        return;
+    }
+    const selectedIndex = Number.parseInt(input, 10);
+    if (!Number.isFinite(selectedIndex) || selectedIndex < 1 || selectedIndex > jobs.length) {
+        alert('Please enter a valid number.');
+        return;
+    }
+    const [removed] = jobs.splice(selectedIndex - 1, 1);
+    planningState.activeJobIds.delete(removed.id);
+    saveDecks();
+    renderPlanningJobs();
+    closeToolsMenu();
 }
 
 const workspaceState = {
@@ -574,7 +969,7 @@ function refreshItemList() {
 
         const deckEl = document.createElement('div');
         deckEl.className = 'item-summary-detail';
-        deckEl.textContent = `Deck: ${currentDeck || 'Unassigned'}`;
+        deckEl.textContent = `Deck: ${currentDeck ? currentDeck.name : 'Unassigned'}`;
 
         const modifiedEl = document.createElement('div');
         modifiedEl.className = 'item-summary-detail';
@@ -598,21 +993,36 @@ function refreshItemList() {
 
 function loadDecks() {
     const stored = localStorage.getItem(decksKey);
+    let shouldPersist = false;
     if (stored) {
         try {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length) {
-                return parsed;
+                const normalized = parsed.map((entry) => {
+                    const normalizedEntry = normalizeDeckEntry(entry);
+                    if (typeof entry === 'string' || entry?.name !== normalizedEntry.name || !entry?.jobs) {
+                        shouldPersist = true;
+                    }
+                    return normalizedEntry;
+                });
+                if (shouldPersist) {
+                    const serializable = normalized.map((deck) => deckToSerializable(deck));
+                    localStorage.setItem(decksKey, JSON.stringify(serializable));
+                }
+                return normalized;
             }
         } catch (err) {
             console.warn('Unable to parse stored decks', err);
         }
     }
-    return [...defaultDecks];
+    const defaults = defaultDecks.map((name) => createDeckRecord(name));
+    localStorage.setItem(decksKey, JSON.stringify(defaults.map((deck) => deckToSerializable(deck))));
+    return defaults;
 }
 
 function saveDecks() {
-    localStorage.setItem(decksKey, JSON.stringify(decks));
+    const serializable = decks.map((deck) => deckToSerializable(deck));
+    localStorage.setItem(decksKey, JSON.stringify(serializable));
 }
 
 function renderDeckList() {
@@ -620,22 +1030,35 @@ function renderDeckList() {
     decks.forEach((deck) => {
         const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = deck;
+        button.textContent = deck.name;
+        button.dataset.deckId = deck.id;
         button.addEventListener('click', () => selectDeck(deck));
         deckListEl.appendChild(button);
     });
 }
 
 function selectDeck(deck) {
-    currentDeck = deck;
+    let selectedDeck = deck;
+    if (!selectedDeck) {
+        return;
+    }
+    if (typeof selectedDeck === 'string') {
+        selectedDeck = decks.find((entry) => entry.id === selectedDeck || entry.name === selectedDeck);
+    }
+    if (!selectedDeck) {
+        return;
+    }
+    currentDeck = selectedDeck;
     deactivateMeasureMode();
-    leavePlanningMode();
-    localStorage.setItem(selectedDeckKey, deck);
+    planningState.activeJobIds.clear();
+    localStorage.setItem(selectedDeckKey, currentDeck.name);
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
     history = [];
     workspaceContent.innerHTML = '';
     ensureMeasurementOverlay();
+    ensurePlanningOverlayHost();
+    clearPlanningOverlays();
     clearMeasurements();
     itemMetadata.clear();
     itemHistories.clear();
@@ -643,15 +1066,17 @@ function selectDeck(deck) {
     workspaceState.scale = BASE_SCALE;
     applyWorkspaceTransform();
     closeToolsMenu();
+    renderPlanningJobs();
 }
 
 function goBackToSelection() {
     currentDeck = null;
     deactivateMeasureMode();
-    leavePlanningMode();
+    planningState.activeJobIds.clear();
     localStorage.removeItem(selectedDeckKey);
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
+    renderPlanningJobs();
 }
 
 function applyWorkspaceTransform() {
@@ -1299,7 +1724,7 @@ function toggleToolsMenu() {
     }
     if (shouldOpen) {
         updateMeasureToggleButton();
-        updatePlanningModeUI();
+        updatePlanningStateUI();
     }
 }
 
@@ -1450,7 +1875,7 @@ function handleAddDeckArea() {
     createItemElement({
         width: size,
         height: size,
-        label: `${currentDeck || 'Deck'} area`,
+        label: `${currentDeck?.name || 'Deck'} area`,
         color: '#ffffff',
         type: 'deck-area',
     });
@@ -1460,9 +1885,17 @@ function handleAddDeckArea() {
 function initializeDeckSelection() {
     renderDeckList();
     const storedSelection = localStorage.getItem(selectedDeckKey);
-    if (storedSelection && decks.includes(storedSelection)) {
-        selectDeck(storedSelection);
+    if (storedSelection) {
+        const deck = decks.find(
+            (entry) => entry.id === storedSelection || entry.name === storedSelection
+        );
+        if (deck) {
+            selectDeck(deck);
+        }
     }
+    renderPlanningJobs();
+    updatePlanningControlsState();
+    updatePlanningStateUI();
 }
 
 function handleCreateDeck() {
@@ -1470,11 +1903,11 @@ function handleCreateDeck() {
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed) return;
-    if (decks.includes(trimmed)) {
+    if (decks.some((deck) => deck.name === trimmed)) {
         alert('A deck with that name already exists.');
         return;
     }
-    decks.push(trimmed);
+    decks.push(createDeckRecord(trimmed));
     saveDecks();
     renderDeckList();
 }
@@ -1605,10 +2038,21 @@ if (measureToggleBtn) {
     });
 }
 
-if (togglePlanningModeBtn) {
-    togglePlanningModeBtn.addEventListener('click', () => {
-        togglePlanningMode();
-        closeToolsMenu();
+if (planningCurrentDeckToggle) {
+    planningCurrentDeckToggle.addEventListener('click', () => {
+        handlePlanningCurrentDeckToggle();
+    });
+}
+
+if (createPlanningJobBtn) {
+    createPlanningJobBtn.addEventListener('click', () => {
+        handleCreatePlanningJob();
+    });
+}
+
+if (deletePlanningJobBtn) {
+    deletePlanningJobBtn.addEventListener('click', () => {
+        handleDeletePlanningJob();
     });
 }
 
@@ -1663,7 +2107,7 @@ historyList.addEventListener('click', (event) => {
 });
 
 updateMeasureToggleButton();
-updatePlanningModeUI();
+updatePlanningStateUI();
 
 refreshItemList();
 
