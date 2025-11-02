@@ -54,6 +54,11 @@ measurementOverlay.id = 'measurement-overlay';
 measurementOverlay.className = 'measurement-overlay';
 workspaceContent.appendChild(measurementOverlay);
 
+const planningEditingLayer = document.createElement('div');
+planningEditingLayer.id = 'planning-editing-layer';
+planningEditingLayer.className = 'planning-editing-layer';
+workspaceContent.appendChild(planningEditingLayer);
+
 const planningOverlayHost = document.createElement('div');
 planningOverlayHost.id = 'planning-overlays';
 planningOverlayHost.className = 'planning-overlays';
@@ -84,6 +89,7 @@ const planningState = {
     activeJobIds: new Set(),
     showCurrentDeck: true,
     lockCurrentDeck: false,
+    editingJobId: null,
 };
 let deckModifyMode = false;
 
@@ -112,6 +118,146 @@ function releaseAutolockedDeckAreas() {
         }
         delete deckArea.dataset.autolocked;
     });
+}
+
+function isPlanningItem(element) {
+    return Boolean(element?.dataset?.planningJobId);
+}
+
+function getPlanningJob(jobId) {
+    if (!currentDeck || !jobId) {
+        return null;
+    }
+    const jobs = getCurrentDeckJobs();
+    return jobs.find((job) => job.id === jobId) || null;
+}
+
+function ensurePlanningEditingLayer() {
+    if (!planningEditingLayer.isConnected) {
+        workspaceContent.appendChild(planningEditingLayer);
+    }
+}
+
+function clearPlanningEditingLayer() {
+    const planningElements = Array.from(planningEditingLayer.children);
+    planningElements.forEach((element) => {
+        element.remove();
+    });
+}
+
+function loadPlanningJobForEditing(job) {
+    ensurePlanningEditingLayer();
+    clearPlanningEditingLayer();
+    if (!job || !Array.isArray(job.deck?.items)) {
+        return;
+    }
+    job.deck.items
+        .map((entry) => normalizeWorkspaceLayoutEntry(entry))
+        .filter((entry) => entry && entry.type === 'item')
+        .forEach((entry) => {
+            const element = createItemElement(
+                {
+                    width: entry.width,
+                    height: entry.height,
+                    label: entry.label,
+                    color: entry.color,
+                    type: 'item',
+                },
+                { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
+            );
+            element.dataset.planningJobId = job.id;
+            element.dataset.x = entry.x.toString();
+            element.dataset.y = entry.y.toString();
+            element.dataset.rotation = entry.rotation.toString();
+            element.dataset.width = entry.width.toString();
+            element.dataset.height = entry.height.toString();
+            element.dataset.locked = entry.locked ? 'true' : 'false';
+            element.classList.toggle('locked', entry.locked);
+            element.classList.add('planning-edit-item');
+            element.style.background = entry.color;
+            element.style.width = `${metersToPixels(entry.width)}px`;
+            element.style.height = `${metersToPixels(entry.height)}px`;
+            if (entry.comment) {
+                element.dataset.comment = entry.comment;
+            } else {
+                delete element.dataset.comment;
+            }
+            updateElementTransform(element);
+        });
+}
+
+function serializePlanningEditingItems() {
+    const elements = Array.from(planningEditingLayer.querySelectorAll('.item'));
+    return elements.map((element) => {
+        const width = Number.parseFloat(element.dataset.width);
+        const height = Number.parseFloat(element.dataset.height);
+        const x = Number.parseFloat(element.dataset.x);
+        const y = Number.parseFloat(element.dataset.y);
+        const rotation = Number.parseFloat(element.dataset.rotation);
+        const label = getItemLabel(element);
+        const color = rgbToHex(
+            getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe'
+        );
+        const comment = (element.dataset.comment || '').trim();
+        const locked = element.dataset.locked === 'true';
+        return {
+            type: 'item',
+            label,
+            width: Number.isFinite(width) ? width : DEFAULT_ITEM_WIDTH_METERS,
+            height: Number.isFinite(height) ? height : DEFAULT_ITEM_HEIGHT_METERS,
+            x: Number.isFinite(x) ? x : 0,
+            y: Number.isFinite(y) ? y : 0,
+            rotation: Number.isFinite(rotation) ? rotation : 0,
+            color,
+            comment,
+            locked,
+        };
+    });
+}
+
+function persistCurrentPlanningJob() {
+    if (!planningState.active) {
+        return;
+    }
+    const jobId = planningState.editingJobId;
+    if (!jobId) {
+        return;
+    }
+    const job = getPlanningJob(jobId);
+    if (!job) {
+        return;
+    }
+    job.deck.items = serializePlanningEditingItems();
+    saveDecks();
+    renderPlanningJobOverlay(job);
+}
+
+function setPlanningEditingJob(jobId) {
+    if (!planningState.active) {
+        return;
+    }
+    const normalizedId = typeof jobId === 'string' && jobId.trim() ? jobId : null;
+    if (planningState.editingJobId === normalizedId) {
+        const existing = getPlanningJob(normalizedId);
+        if (existing) {
+            loadPlanningJobForEditing(existing);
+        } else {
+            clearPlanningEditingLayer();
+        }
+        return;
+    }
+    persistCurrentPlanningJob();
+    planningState.editingJobId = normalizedId;
+    if (!normalizedId) {
+        clearPlanningEditingLayer();
+        return;
+    }
+    const job = getPlanningJob(normalizedId);
+    if (!job) {
+        clearPlanningEditingLayer();
+        return;
+    }
+    loadPlanningJobForEditing(job);
 }
 
 function setDeckSettingsVisibility(visible) {
@@ -565,6 +711,7 @@ function updatePlanningStateUI() {
         togglePlanningModeBtn.classList.toggle('active', planningActive);
     }
     if (workspaceContainer) {
+        workspaceContainer.classList.toggle('planning-mode-active', planningActive);
         workspaceContainer.classList.toggle(
             'planning-hide-current',
             planningActive && !planningState.showCurrentDeck
@@ -588,6 +735,8 @@ function enterPlanningMode() {
     planningState.active = true;
     planningState.showCurrentDeck = true;
     planningState.lockCurrentDeck = true;
+    planningState.editingJobId = null;
+    clearPlanningEditingLayer();
     renderPlanningJobs();
     closeToolsMenu();
 }
@@ -597,9 +746,12 @@ function exitPlanningMode() {
         closeToolsMenu();
         return;
     }
+    persistCurrentPlanningJob();
     planningState.active = false;
     planningState.showCurrentDeck = true;
     planningState.lockCurrentDeck = false;
+    planningState.editingJobId = null;
+    clearPlanningEditingLayer();
     renderPlanningJobs();
     closeToolsMenu();
 }
@@ -629,8 +781,12 @@ function renderPlanningJobOverlay(job) {
         planningOverlayHost.appendChild(overlay);
     }
     overlay.innerHTML = '';
-    overlay.hidden = !planningState.activeJobIds.has(job.id);
+    const isEditingJob = planningState.editingJobId === job.id;
+    overlay.hidden = !planningState.activeJobIds.has(job.id) || isEditingJob;
     job.deck.items.forEach((item) => {
+        if (item.type === 'deck-area') {
+            return;
+        }
         const element = document.createElement('div');
         element.className = `planning-overlay-item ${item.type}`;
         const widthPixels = metersToPixels(item.width);
@@ -666,6 +822,8 @@ function renderPlanningJobs() {
         if (planningOverlayHost.isConnected) {
             planningOverlayHost.remove();
         }
+        clearPlanningEditingLayer();
+        planningState.editingJobId = null;
     }
     if (!currentDeck) {
         planningState.activeJobIds.clear();
@@ -676,6 +834,8 @@ function renderPlanningJobs() {
         if (planningOverlayHost.isConnected) {
             planningOverlayHost.remove();
         }
+        clearPlanningEditingLayer();
+        planningState.editingJobId = null;
         const emptyMessage = document.createElement('p');
         emptyMessage.className = 'list-empty';
         emptyMessage.textContent = 'Select a deck to start planning.';
@@ -691,6 +851,16 @@ function renderPlanningJobs() {
             planningState.activeJobIds.delete(jobId);
         }
     });
+    if (!validIds.has(planningState.editingJobId)) {
+        planningState.editingJobId = null;
+        clearPlanningEditingLayer();
+    }
+    if (planningActive && planningState.editingJobId === null) {
+        const next = planningState.activeJobIds.values().next();
+        if (!next.done) {
+            setPlanningEditingJob(next.value);
+        }
+    }
     planningJobsList.innerHTML = '';
     if (!jobs.length) {
         planningState.activeJobIds.clear();
@@ -700,6 +870,8 @@ function renderPlanningJobs() {
         if (planningOverlayHost.isConnected) {
             planningOverlayHost.remove();
         }
+        clearPlanningEditingLayer();
+        planningState.editingJobId = null;
         const emptyMessage = document.createElement('p');
         emptyMessage.className = 'list-empty';
         emptyMessage.textContent = 'No planning decks yet.';
@@ -710,6 +882,16 @@ function renderPlanningJobs() {
     }
     if (planningActive) {
         ensurePlanningOverlayHost();
+        ensurePlanningEditingLayer();
+        if (planningState.editingJobId) {
+            const editingJob = getPlanningJob(planningState.editingJobId);
+            if (editingJob) {
+                const hasElements = planningEditingLayer.querySelector('.item');
+                if (!hasElements) {
+                    loadPlanningJobForEditing(editingJob);
+                }
+            }
+        }
     }
     jobs.forEach((job) => {
         const entry = document.createElement('div');
@@ -720,7 +902,10 @@ function renderPlanningJobs() {
         toggle.textContent = job.label;
         const isActive = planningState.activeJobIds.has(job.id);
         toggle.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        const isEditing = planningState.editingJobId === job.id;
+        toggle.setAttribute('aria-current', isEditing ? 'true' : 'false');
         toggle.classList.toggle('active', isActive);
+        toggle.classList.toggle('editing', isEditing);
         toggle.disabled = !planningActive;
         toggle.addEventListener('click', () => togglePlanningJob(job.id));
         entry.appendChild(toggle);
@@ -762,10 +947,22 @@ function togglePlanningJob(jobId) {
     if (!jobs.some((job) => job.id === jobId)) {
         return;
     }
-    if (planningState.activeJobIds.has(jobId)) {
+    const isActive = planningState.activeJobIds.has(jobId);
+    if (isActive) {
         planningState.activeJobIds.delete(jobId);
+        if (planningState.editingJobId === jobId) {
+            const next = planningState.activeJobIds.values().next();
+            if (!next.done) {
+                setPlanningEditingJob(next.value);
+            } else {
+                setPlanningEditingJob(null);
+            }
+        }
     } else {
         planningState.activeJobIds.add(jobId);
+        if (!planningState.editingJobId || planningState.editingJobId === jobId) {
+            setPlanningEditingJob(jobId);
+        }
     }
     renderPlanningJobs();
 }
@@ -805,7 +1002,9 @@ function deletePlanningJob(jobId) {
 }
 
 function serializeWorkspaceElements() {
-    const elements = Array.from(workspaceContent.querySelectorAll('.item, .deck-area'));
+    const elements = Array.from(workspaceContent.querySelectorAll('.item, .deck-area')).filter(
+        (element) => !element.closest('#planning-editing-layer')
+    );
     return elements.map((element) => {
         const type = element.dataset.type === 'deck-area' ? 'deck-area' : 'item';
         const label =
@@ -838,6 +1037,10 @@ function serializeWorkspaceElements() {
         }
         return itemData;
     });
+}
+
+function serializeWorkspaceItemsForPlanning() {
+    return serializeWorkspaceElements().filter((entry) => entry.type !== 'deck-area');
 }
 
 function normalizeWorkspaceLayoutEntry(entry) {
@@ -979,14 +1182,16 @@ function handleCreatePlanningJob() {
     }
     const jobs = getCurrentDeckJobs();
     const label = generatePlanningJobLabel(jobs);
+    persistCurrentPlanningJob();
     const job = {
         id: generatePlanningJobId(),
         label,
-        deck: { items: serializeWorkspaceElements() },
+        deck: { items: serializeWorkspaceItemsForPlanning() },
     };
     jobs.push(job);
     planningState.activeJobIds.clear();
     planningState.activeJobIds.add(job.id);
+    setPlanningEditingJob(job.id);
     saveDecks();
     renderPlanningJobs();
 }
@@ -1009,6 +1214,9 @@ function generateAttachmentId() {
 
 function ensureItemMetadataRecord(element) {
     if (!element || element.dataset.type !== 'item') {
+        return null;
+    }
+    if (isPlanningItem(element)) {
         return null;
     }
     if (!element.dataset.itemId) {
@@ -1136,6 +1344,9 @@ function recordItemHistory(element, message, timestamp = new Date()) {
     if (!element || element.dataset.type !== 'item' || !message) {
         return;
     }
+    if (isPlanningItem(element)) {
+        return;
+    }
     const itemId = element.dataset.itemId;
     if (!itemId) {
         return;
@@ -1150,6 +1361,9 @@ function recordItemHistory(element, message, timestamp = new Date()) {
 
 function registerItem(element, initialMessage) {
     if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    if (isPlanningItem(element)) {
         return;
     }
     if (!element.dataset.itemId) {
@@ -1179,6 +1393,9 @@ function registerItem(element, initialMessage) {
 
 function updateItemRecord(element, message, { updateComment = true, updateDeck = true } = {}) {
     if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    if (isPlanningItem(element)) {
         return;
     }
     if (!element.dataset.itemId) {
@@ -1218,6 +1435,9 @@ function updateItemRecord(element, message, { updateComment = true, updateDeck =
 
 function removeItemRecord(element) {
     if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    if (isPlanningItem(element)) {
         return;
     }
     const itemId = element.dataset.itemId;
@@ -1384,12 +1604,15 @@ function selectDeck(deck) {
     planningState.activeJobIds.clear();
     planningState.showCurrentDeck = true;
     planningState.lockCurrentDeck = false;
+    planningState.editingJobId = null;
     localStorage.setItem(selectedDeckKey, currentDeck.name);
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
     history = [];
     workspaceContent.innerHTML = '';
+    clearPlanningEditingLayer();
     ensureMeasurementOverlay();
+    ensurePlanningEditingLayer();
     ensurePlanningOverlayHost();
     clearPlanningOverlays();
     clearMeasurements();
@@ -1408,9 +1631,11 @@ function goBackToSelection() {
     planningState.activeJobIds.clear();
     planningState.showCurrentDeck = true;
     planningState.lockCurrentDeck = false;
+    planningState.editingJobId = null;
     localStorage.removeItem(selectedDeckKey);
     deckSelectionView.classList.add('active');
     workspaceView.classList.remove('active');
+    clearPlanningEditingLayer();
     renderPlanningJobs();
     setDeckModifyMode(false);
     closeDeckSettingsPanel();
@@ -1429,7 +1654,7 @@ function addHistoryEntry(label) {
 }
 
 function createItemElement({ width, height, label, color, type = 'item' }, options = {}) {
-    const { skipHistory = false } = options;
+    const { skipHistory = false, skipMetadata = false, container = workspaceContent } = options;
     const element = document.createElement('div');
     element.className = type;
     element.dataset.type = type;
@@ -1467,14 +1692,18 @@ function createItemElement({ width, height, label, color, type = 'item' }, optio
     setupItemInteractions(element, resizeHandle);
     const creationMessage = `${type === 'item' ? 'Item' : 'Deck'} created${label ? `: ${label}` : ''}`;
     if (type === 'deck-area') {
-        workspaceContent.insertBefore(element, workspaceContent.firstChild);
+        if (container === workspaceContent) {
+            container.insertBefore(element, container.firstChild);
+        } else {
+            container.appendChild(element);
+        }
     } else {
-        workspaceContent.appendChild(element);
+        container.appendChild(element);
     }
     if (!skipHistory) {
         addHistoryEntry(creationMessage);
     }
-    if (type === 'item') {
+    if (type === 'item' && !skipMetadata) {
         registerItem(element, skipHistory ? null : creationMessage);
     }
     return element;
@@ -1591,6 +1820,10 @@ function updateElementTransform(element) {
 }
 
 function handleItemInteractionComplete(element, completedAction) {
+    if (isPlanningItem(element)) {
+        persistCurrentPlanningJob();
+        return;
+    }
     if (completedAction === 'move') {
         const deck = determineDeckForItem(element);
         const message = deck
@@ -1625,6 +1858,10 @@ function rotateItemBy(element, degrees) {
     const updated = current + degrees;
     element.dataset.rotation = updated.toFixed(2);
     updateElementTransform(element);
+    if (isPlanningItem(element)) {
+        persistCurrentPlanningJob();
+        return;
+    }
     const formattedDegrees = degrees > 0 ? `+${degrees}` : `${degrees}`;
     const message = `Item rotated ${formattedDegrees}°${getItemHistoryLabel(element)}`;
     addHistoryEntry(message);
@@ -1634,6 +1871,10 @@ function rotateItemBy(element, degrees) {
 function setItemLockState(element, locked) {
     element.dataset.locked = locked ? 'true' : 'false';
     element.classList.toggle('locked', locked);
+    if (isPlanningItem(element)) {
+        persistCurrentPlanningJob();
+        return;
+    }
     const message = `Item ${locked ? 'locked' : 'unlocked'}${getItemHistoryLabel(element)}`;
     addHistoryEntry(message);
     updateItemRecord(element, message, { updateComment: false, updateDeck: false });
@@ -1664,10 +1905,14 @@ function promptResizeItem(element) {
     element.dataset.height = height.toString();
     element.style.width = `${metersToPixels(width)}px`;
     element.style.height = `${metersToPixels(height)}px`;
+    updateElementTransform(element);
+    if (isPlanningItem(element)) {
+        persistCurrentPlanningJob();
+        return;
+    }
     const message = `Item resized to ${width.toFixed(2)}m × ${height.toFixed(2)}m${getItemHistoryLabel(element)}`;
     addHistoryEntry(message);
     updateItemRecord(element, message, { updateComment: false });
-    updateElementTransform(element);
 }
 
 function promptItemComment(element) {
@@ -1682,12 +1927,20 @@ function promptItemComment(element) {
     if (trimmed) {
         element.setAttribute('data-comment', trimmed);
         element.setAttribute('title', trimmed);
+        if (isPlanningItem(element)) {
+            persistCurrentPlanningJob();
+            return;
+        }
         const message = `${hadComment ? 'Comment updated' : 'Comment added'}${getItemHistoryLabel(element)}`;
         addHistoryEntry(message);
         updateItemRecord(element, message, { updateDeck: false, updateComment: true });
     } else {
         element.removeAttribute('data-comment');
         element.removeAttribute('title');
+        if (isPlanningItem(element)) {
+            persistCurrentPlanningJob();
+            return;
+        }
         const message = `Comment cleared${getItemHistoryLabel(element)}`;
         addHistoryEntry(message);
         updateItemRecord(element, message, { updateDeck: false, updateComment: true });
@@ -1698,17 +1951,27 @@ function duplicateItem(element) {
     if (!element || element.dataset.type !== 'item') {
         return null;
     }
+    const planningItem = isPlanningItem(element);
     const width = parseFloat(element.dataset.width) || DEFAULT_ITEM_WIDTH_METERS;
     const height = parseFloat(element.dataset.height) || DEFAULT_ITEM_HEIGHT_METERS;
     const label = getItemLabel(element);
     const color = rgbToHex(getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe');
-    const duplicate = createItemElement({ width, height, label, color, type: 'item' });
+    const duplicateOptions = planningItem
+        ? { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
+        : {};
+    const duplicate = createItemElement({ width, height, label, color, type: 'item' }, duplicateOptions);
     const offset = 40;
     const baseX = parseFloat(element.dataset.x) || 0;
     const baseY = parseFloat(element.dataset.y) || 0;
     duplicate.dataset.x = (baseX + offset).toString();
     duplicate.dataset.y = (baseY + offset).toString();
     updateElementTransform(duplicate);
+    if (planningItem) {
+        duplicate.dataset.planningJobId = element.dataset.planningJobId;
+        duplicate.classList.add('planning-edit-item');
+        persistCurrentPlanningJob();
+        return duplicate;
+    }
     const originalAttachments = getItemAttachments(element);
     if (originalAttachments.length) {
         const duplicateMetadata = ensureItemMetadataRecord(duplicate);
@@ -1745,6 +2008,9 @@ function removeItemAttachment(element, attachmentId) {
 
 function promptItemAttachment(element, { onComplete } = {}) {
     if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    if (isPlanningItem(element)) {
         return;
     }
     const input = document.createElement('input');
@@ -1830,6 +2096,7 @@ function openItemModifyDialog(element) {
     }
     closeModifyDialog();
     const locked = element.dataset.locked === 'true';
+    const planningItem = isPlanningItem(element);
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.addEventListener('click', (event) => {
@@ -1929,7 +2196,7 @@ function openItemModifyDialog(element) {
     attachmentTitle.textContent = 'Attachments';
     attachmentHeader.appendChild(attachmentTitle);
 
-    if (!locked) {
+    if (!locked && !planningItem) {
         const addAttachmentButton = document.createElement('button');
         addAttachmentButton.type = 'button';
         addAttachmentButton.className = 'ghost';
@@ -2000,6 +2267,7 @@ function applyItemModifications(element, { width, height, label, color }) {
     if (!element || element.dataset.type !== 'item') {
         return;
     }
+    const planningItem = isPlanningItem(element);
     const currentWidth = parseFloat(element.dataset.width) || DEFAULT_ITEM_WIDTH_METERS;
     const currentHeight = parseFloat(element.dataset.height) || DEFAULT_ITEM_HEIGHT_METERS;
     const normalizedWidth = clampToMinSize(Number.isFinite(width) ? width : currentWidth);
@@ -2035,6 +2303,10 @@ function applyItemModifications(element, { width, height, label, color }) {
     }
     updateAttachmentIndicator(element);
     updateElementTransform(element);
+    if (planningItem) {
+        persistCurrentPlanningJob();
+        return;
+    }
     const message = `Item modified (${changes.join(', ')})${getItemHistoryLabel(element)}`;
     addHistoryEntry(message);
     updateItemRecord(element, message, { updateComment: false });
@@ -2047,6 +2319,21 @@ function handleCreateItem() {
     const height = clampToMinSize(Number.isFinite(rawHeight) ? rawHeight : DEFAULT_ITEM_HEIGHT_METERS);
     const label = inputLabel.value.trim();
     const color = inputColor.value;
+
+    if (planningState.active && planningState.editingJobId) {
+        const element = createItemElement(
+            { width, height, label, color, type: 'item' },
+            { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
+        );
+        element.dataset.planningJobId = planningState.editingJobId;
+        element.classList.add('planning-edit-item');
+        updateElementTransform(element);
+        persistCurrentPlanningJob();
+        inputWidth.value = width.toFixed(2);
+        inputHeight.value = height.toFixed(2);
+        inputLabel.value = '';
+        return;
+    }
 
     createItemElement({ width, height, label, color, type: 'item' });
     inputWidth.value = width.toFixed(2);
@@ -2147,12 +2434,17 @@ function handleContextAction(action) {
         } else if (action === 'attach-file') {
             promptItemAttachment(activeItem, { onComplete: renderModifyDialogAttachments });
         } else if (action === 'delete') {
-            const labelSuffix = getItemHistoryLabel(activeItem);
-            const message = `Item deleted${labelSuffix}`;
-            addHistoryEntry(message);
-            recordItemHistory(activeItem, message);
-            removeItemRecord(activeItem);
-            activeItem.remove();
+            if (isPlanningItem(activeItem)) {
+                activeItem.remove();
+                persistCurrentPlanningJob();
+            } else {
+                const labelSuffix = getItemHistoryLabel(activeItem);
+                const message = `Item deleted${labelSuffix}`;
+                addHistoryEntry(message);
+                recordItemHistory(activeItem, message);
+                removeItemRecord(activeItem);
+                activeItem.remove();
+            }
         } else if (action === 'resize') {
             promptResizeItem(activeItem);
         } else if (action === 'lock-item') {
@@ -2183,10 +2475,13 @@ function getContextMenuActions(element) {
     }
     const locked = element.dataset.locked === 'true';
     const hasComment = Boolean((element.dataset.comment || '').trim());
+    const planningItem = isPlanningItem(element);
     const actions = [];
     actions.push({ action: 'modify-item', label: locked ? 'View details…' : 'Modify…' });
     if (!locked) {
-        actions.push({ action: 'attach-file', label: 'Attach file…' });
+        if (!planningItem) {
+            actions.push({ action: 'attach-file', label: 'Attach file…' });
+        }
         actions.push({ action: 'resize', label: 'Resize…' });
     }
     actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
