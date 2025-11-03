@@ -632,7 +632,7 @@ button.icon-button {
     display: flex;
     align-items: center;
     justify-content: center;
-    transform-origin: 0 0;
+    transform-origin: 50% 50%;
     border-radius: 0;
     border: 1px dashed rgba(14, 165, 233, 0.6);
     background: rgba(14, 165, 233, 0.2);

@@ -156,40 +156,6 @@ function loadPlanningJobForEditing(job) {
         .filter((entry) => entry !== null);
 
     entries
-        .filter((entry) => entry.type === 'deck-area')
-        .forEach((entry) => {
-            const element = createItemElement(
-                {
-                    width: entry.width,
-                    height: entry.height,
-                    label: entry.label,
-                    color: '#ffffff',
-                    type: 'deck-area',
-                },
-                { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
-            );
-            element.dataset.planningJobId = job.id;
-            element.dataset.x = entry.x.toString();
-            element.dataset.y = entry.y.toString();
-            element.dataset.rotation = entry.rotation.toString();
-            element.dataset.width = entry.width.toString();
-            element.dataset.height = entry.height.toString();
-            element.dataset.label = entry.label;
-            element.dataset.nameHidden = entry.nameHidden ? 'true' : 'false';
-            setDeckLockState(element, entry.locked);
-            element.classList.add('planning-edit-item', 'planning-edit-deck-area');
-            element.classList.toggle('name-hidden', entry.nameHidden);
-            const nameEl = element.querySelector('.deck-name');
-            if (nameEl) {
-                nameEl.textContent = entry.label;
-                nameEl.style.display = entry.nameHidden ? 'none' : '';
-            }
-            element.style.width = `${metersToPixels(entry.width)}px`;
-            element.style.height = `${metersToPixels(entry.height)}px`;
-            updateElementTransform(element);
-        });
-
-    entries
         .filter((entry) => entry.type === 'item')
         .forEach((entry) => {
             const element = createItemElement(
@@ -224,37 +190,28 @@ function loadPlanningJobForEditing(job) {
 }
 
 function serializePlanningEditingItems() {
-    const elements = Array.from(planningEditingLayer.querySelectorAll('.item, .deck-area'));
+    const elements = Array.from(planningEditingLayer.querySelectorAll('.item'));
     return elements.map((element) => {
-        const type = element.dataset.type === 'deck-area' ? 'deck-area' : 'item';
         const width = Number.parseFloat(element.dataset.width);
         const height = Number.parseFloat(element.dataset.height);
         const x = Number.parseFloat(element.dataset.x);
         const y = Number.parseFloat(element.dataset.y);
         const rotation = Number.parseFloat(element.dataset.rotation);
         const locked = element.dataset.locked === 'true';
-        const base = {
-            type,
-            label:
-                type === 'deck-area'
-                    ? element.dataset.label || 'Deck area'
-                    : getItemLabel(element),
+        return {
+            type: 'item',
+            label: getItemLabel(element),
             width: Number.isFinite(width) ? width : DEFAULT_ITEM_WIDTH_METERS,
             height: Number.isFinite(height) ? height : DEFAULT_ITEM_HEIGHT_METERS,
             x: Number.isFinite(x) ? x : 0,
             y: Number.isFinite(y) ? y : 0,
             rotation: Number.isFinite(rotation) ? rotation : 0,
             locked,
-        };
-        if (type === 'item') {
-            base.color = rgbToHex(
+            color: rgbToHex(
                 getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe'
-            );
-            base.comment = (element.dataset.comment || '').trim();
-        } else {
-            base.nameHidden = element.dataset.nameHidden === 'true';
-        }
-        return base;
+            ),
+            comment: (element.dataset.comment || '').trim(),
+        };
     });
 }
 
@@ -586,7 +543,10 @@ function normalizePlanningItem(item) {
     if (!item || typeof item !== 'object') {
         return null;
     }
-    const type = item.type === 'deck-area' ? 'deck-area' : 'item';
+    const type = item.type === 'item' ? 'item' : 'deck-area';
+    if (type !== 'item') {
+        return null;
+    }
     const label = typeof item.label === 'string' ? item.label : '';
     const width = Number.parseFloat(item.width);
     const height = Number.parseFloat(item.height);
@@ -602,12 +562,8 @@ function normalizePlanningItem(item) {
         y: Number.isFinite(y) ? y : 0,
         rotation: Number.isFinite(rotation) ? rotation : 0,
     };
-    if (type === 'item') {
-        normalized.color =
-            typeof item.color === 'string' && item.color.trim() ? item.color : '#3a7afe';
-    } else {
-        normalized.nameHidden = item.nameHidden === true || item.nameHidden === 'true';
-    }
+    normalized.color =
+        typeof item.color === 'string' && item.color.trim() ? item.color : '#3a7afe';
     return normalized;
 }
 
@@ -1084,8 +1040,13 @@ function serializeWorkspaceElements() {
     });
 }
 
-function serializeWorkspaceItemsForPlanning() {
-    return serializeWorkspaceElements();
+function serializeWorkspaceItemsForPlanning({ includeDeckAreas = false } = {}) {
+    return serializeWorkspaceElements().filter((entry) => {
+        if (entry.type === 'deck-area') {
+            return includeDeckAreas;
+        }
+        return entry.type === 'item';
+    });
 }
 
 function normalizeWorkspaceLayoutEntry(entry) {
@@ -1226,12 +1187,21 @@ function handleCreatePlanningJob() {
         return;
     }
     const jobs = getCurrentDeckJobs();
-    const label = generatePlanningJobLabel(jobs);
+    const defaultLabel = generatePlanningJobLabel(jobs);
+    const inputLabel = prompt('Name your new planning deck', defaultLabel);
+    if (inputLabel === null) {
+        return;
+    }
+    const label = inputLabel.trim() ? inputLabel.trim() : defaultLabel;
+    const duplicateItems = confirm(
+        'Duplicate current items into this planning deck?\nSelect OK to duplicate, or Cancel to start blank.'
+    );
     persistCurrentPlanningJob();
+    const items = duplicateItems ? serializeWorkspaceItemsForPlanning() : [];
     const job = {
         id: generatePlanningJobId(),
         label,
-        deck: { items: serializeWorkspaceItemsForPlanning() },
+        deck: { items },
     };
     jobs.push(job);
     planningState.activeJobIds.clear();
