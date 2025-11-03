@@ -23,7 +23,8 @@
         <section id="workspace-view" class="view">
             <header class="workspace-header">
                 <div id="deck-modify-notice" class="deck-modify-notice" hidden>
-                    Warning: modify deck mode
+                    <div class="deck-modify-warning">Warning: modify deck mode</div>
+                    <div class="deck-modify-escape">click Escape button to leave modify mode</div>
                 </div>
                 <div class="left-controls">
                     <div class="nav-controls">
@@ -72,14 +73,14 @@
                                     aria-hidden="true"
                                 >
                                     <div class="deck-settings-section">
+                                        <button id="deck-download-button" type="button">Download layout</button>
+                                        <button id="deck-upload-button" type="button" disabled>Upload layout</button>
+                                    </div>
+                                    <div class="deck-settings-section">
                                         <button id="deck-modify-toggle" type="button">Enter modify mode</button>
                                     </div>
                                     <div class="deck-settings-section">
                                         <button id="deck-add-area-button" type="button">Add deck area</button>
-                                    </div>
-                                    <div class="deck-settings-section">
-                                        <button id="deck-download-button" type="button" disabled>Download layout</button>
-                                        <button id="deck-upload-button" type="button" disabled>Upload layout</button>
                                     </div>
                                 </div>
                             </div>

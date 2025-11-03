@@ -729,6 +729,62 @@ button.icon-button {
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35);
 }
 
+.deck-area .deck-area-guides {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: none;
+}
+
+.deck-area.show-resize-guides .deck-area-guides {
+    display: block;
+}
+
+.deck-area .deck-area-guide {
+    position: absolute;
+    color: #0f172a;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.deck-area .deck-area-guide-width {
+    left: 0;
+    right: 0;
+    top: 50%;
+    border-top: 2px dashed rgba(15, 23, 42, 0.35);
+}
+
+.deck-area .deck-area-guide-width .deck-area-guide-label {
+    position: absolute;
+    top: -1.4rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(248, 250, 252, 0.95);
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
+.deck-area .deck-area-guide-height {
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    border-left: 2px dashed rgba(15, 23, 42, 0.35);
+}
+
+.deck-area .deck-area-guide-height .deck-area-guide-label {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(248, 250, 252, 0.95);
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
 .deck-area.locked {
     border-style: dashed;
     cursor: default;
@@ -945,16 +1001,27 @@ button.icon-button {
 }
 
 .deck-modify-notice {
-    display: none;
     width: 100%;
     text-align: center;
     font-size: 0.75rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     font-weight: 700;
     margin-bottom: 0.25rem;
     order: -1;
     align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.deck-modify-warning {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.deck-modify-escape {
+    color: var(--danger);
+    letter-spacing: 0.05em;
 }
 
 .workspace-header.modify-mode {
@@ -965,7 +1032,7 @@ button.icon-button {
 }
 
 .workspace-header.modify-mode .deck-modify-notice {
-    display: block;
+    display: flex;
 }
 
 .workspace-header.modify-mode button.ghost,
