@@ -244,20 +244,24 @@ function setPlanningEditingJob(jobId) {
         } else {
             clearPlanningEditingLayer();
         }
+        refreshItemList();
         return;
     }
     persistCurrentPlanningJob();
     planningState.editingJobId = normalizedId;
     if (!normalizedId) {
         clearPlanningEditingLayer();
+        refreshItemList();
         return;
     }
     const job = getPlanningJob(normalizedId);
     if (!job) {
         clearPlanningEditingLayer();
+        refreshItemList();
         return;
     }
     loadPlanningJobForEditing(job);
+    refreshItemList();
 }
 
 function setDeckSettingsVisibility(visible) {
@@ -737,6 +741,7 @@ function enterPlanningMode() {
     planningState.editingJobId = null;
     clearPlanningEditingLayer();
     renderPlanningJobs();
+    refreshItemList();
     closeToolsMenu();
 }
 
@@ -752,6 +757,7 @@ function exitPlanningMode() {
     planningState.editingJobId = null;
     clearPlanningEditingLayer();
     renderPlanningJobs();
+    refreshItemList();
     closeToolsMenu();
 }
 
@@ -964,6 +970,7 @@ function togglePlanningJob(jobId) {
         }
     }
     renderPlanningJobs();
+    refreshItemList();
 }
 
 function handlePlanningCurrentDeckToggle() {
@@ -998,6 +1005,7 @@ function deletePlanningJob(jobId) {
     planningState.activeJobIds.delete(jobId);
     saveDecks();
     renderPlanningJobs();
+    refreshItemList();
 }
 
 function serializeWorkspaceElements() {
@@ -1476,7 +1484,24 @@ function refreshItemList() {
     if (!historyList) return;
     updateSortButtons();
     historyList.innerHTML = '';
-    let items = Array.from(itemMetadata.values());
+    let items = Array.from(itemMetadata.values()).filter((item) => item && item.element);
+
+    const planningActive = planningState.active;
+    if (planningActive) {
+        const allowedPlanningJobIds = new Set(planningState.activeJobIds);
+        if (planningState.editingJobId) {
+            allowedPlanningJobIds.add(planningState.editingJobId);
+        }
+        items = items.filter((item) => {
+            const planningJobId = item.element?.dataset?.planningJobId;
+            if (!planningJobId) {
+                return false;
+            }
+            return allowedPlanningJobIds.has(planningJobId);
+        });
+    } else {
+        items = items.filter((item) => !isPlanningItem(item.element));
+    }
 
     const normalizedQuery = historySearchQuery.trim().toLowerCase();
     if (normalizedQuery) {
@@ -1511,7 +1536,9 @@ function refreshItemList() {
         li.className = 'item-summary';
         li.dataset.itemId = item.id;
 
-        const currentDeck = determineDeckForItem(item.element) || item.deck || null;
+        const element = item.element;
+        const planningJobId = element?.dataset?.planningJobId;
+        const currentDeck = determineDeckForItem(element) || item.deck || null;
         if (currentDeck !== item.deck) {
             item.deck = currentDeck;
         }
@@ -1533,7 +1560,20 @@ function refreshItemList() {
 
         const deckEl = document.createElement('div');
         deckEl.className = 'item-summary-detail';
-        deckEl.textContent = `Deck: ${currentDeck ? currentDeck.name : 'Unassigned'}`;
+        let deckLabel = 'Unassigned';
+        if (planningJobId) {
+            const job = getPlanningJob(planningJobId);
+            deckLabel = job ? `Planning: ${job.label}` : 'Planning deck';
+        } else if (currentDeck) {
+            if (typeof currentDeck === 'string') {
+                deckLabel = currentDeck;
+            } else if (currentDeck?.name) {
+                deckLabel = currentDeck.name;
+            } else if (currentDeck?.label) {
+                deckLabel = currentDeck.label;
+            }
+        }
+        deckEl.textContent = `Deck: ${deckLabel}`;
 
         const modifiedEl = document.createElement('div');
         modifiedEl.className = 'item-summary-detail';
