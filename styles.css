@@ -743,7 +743,7 @@ button.icon-button {
 .deck-area .deck-area-guide {
     position: absolute;
     color: #0f172a;
-    font-size: 0.85rem;
+    font-size: 1rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -758,11 +758,11 @@ button.icon-button {
 
 .deck-area .deck-area-guide-width .deck-area-guide-label {
     position: absolute;
-    top: -1.4rem;
+    top: -2rem;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(248, 250, 252, 0.95);
-    padding: 0.2rem 0.5rem;
+    padding: 0.25rem 0.6rem;
     border-radius: 999px;
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
 }
@@ -776,11 +776,11 @@ button.icon-button {
 
 .deck-area .deck-area-guide-height .deck-area-guide-label {
     position: absolute;
-    left: 0.75rem;
+    left: 1.5rem;
     top: 50%;
     transform: translateY(-50%);
     background: rgba(248, 250, 252, 0.95);
-    padding: 0.2rem 0.5rem;
+    padding: 0.25rem 0.6rem;
     border-radius: 999px;
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
 }
@@ -1008,10 +1008,14 @@ button.icon-button {
     margin-bottom: 0.25rem;
     order: -1;
     align-self: stretch;
-    display: flex;
+    display: none;
     flex-direction: column;
     gap: 0.25rem;
     align-items: center;
+}
+
+.deck-modify-notice.active {
+    display: flex;
 }
 
 .deck-modify-warning {
