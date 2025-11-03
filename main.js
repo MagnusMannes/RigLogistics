@@ -294,8 +294,8 @@ function updateDeckSettingsButtons() {
         deckModifyToggleBtn.textContent = deckModifyMode ? 'Exit modify mode' : 'Enter modify mode';
     }
     if (deckDownloadButton) {
-        deckDownloadButton.disabled = !deckModifyMode;
-        deckDownloadButton.setAttribute('aria-disabled', deckModifyMode ? 'false' : 'true');
+        deckDownloadButton.disabled = false;
+        deckDownloadButton.setAttribute('aria-disabled', 'false');
     }
     if (deckUploadButton) {
         deckUploadButton.disabled = !deckModifyMode;
@@ -311,8 +311,10 @@ function setDeckModifyMode(active) {
     const shouldActivate = Boolean(active);
     if (shouldActivate) {
         releaseAutolockedDeckAreas();
+        document.addEventListener('keydown', handleDeckModifyKeydown);
     } else {
         enforceDeckAreaLocks();
+        document.removeEventListener('keydown', handleDeckModifyKeydown);
     }
     if (deckModifyMode === shouldActivate) {
         updateDeckSettingsButtons();
@@ -331,6 +333,14 @@ function setDeckModifyMode(active) {
     updateDeckSettingsButtons();
     if (!deckModifyMode) {
         closeContextMenu();
+        getDeckAreaElements().forEach((deckArea) => hideDeckAreaResizeGuides(deckArea));
+    }
+}
+
+function handleDeckModifyKeydown(event) {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        setDeckModifyMode(false);
     }
 }
 
@@ -1708,6 +1718,71 @@ function addHistoryEntry(label) {
     history.unshift({ label, timestamp: new Date() });
 }
 
+function ensureDeckAreaGuideElements(element) {
+    if (!element || element.dataset.type !== 'deck-area') {
+        return null;
+    }
+    let container = element.querySelector('.deck-area-guides');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'deck-area-guides';
+
+        const widthGuide = document.createElement('div');
+        widthGuide.className = 'deck-area-guide deck-area-guide-width';
+        const widthLabel = document.createElement('span');
+        widthLabel.className = 'deck-area-guide-label';
+        widthGuide.appendChild(widthLabel);
+
+        const heightGuide = document.createElement('div');
+        heightGuide.className = 'deck-area-guide deck-area-guide-height';
+        const heightLabel = document.createElement('span');
+        heightLabel.className = 'deck-area-guide-label';
+        heightGuide.appendChild(heightLabel);
+
+        container.append(widthGuide, heightGuide);
+        element.appendChild(container);
+    }
+    return container;
+}
+
+function updateDeckAreaResizeGuides(element) {
+    if (!element || element.dataset.type !== 'deck-area') {
+        return;
+    }
+    const container = ensureDeckAreaGuideElements(element);
+    if (!container) {
+        return;
+    }
+    const width = Number.parseFloat(element.dataset.width);
+    const height = Number.parseFloat(element.dataset.height);
+    const widthLabel = container.querySelector('.deck-area-guide-width .deck-area-guide-label');
+    const heightLabel = container.querySelector('.deck-area-guide-height .deck-area-guide-label');
+    if (widthLabel) {
+        const formattedWidth = Number.isFinite(width) ? width.toFixed(2) : '0.00';
+        widthLabel.textContent = `${formattedWidth} m`;
+    }
+    if (heightLabel) {
+        const formattedHeight = Number.isFinite(height) ? height.toFixed(2) : '0.00';
+        heightLabel.textContent = `${formattedHeight} m`;
+    }
+}
+
+function showDeckAreaResizeGuides(element) {
+    if (!element || element.dataset.type !== 'deck-area') {
+        return;
+    }
+    ensureDeckAreaGuideElements(element);
+    updateDeckAreaResizeGuides(element);
+    element.classList.add('show-resize-guides');
+}
+
+function hideDeckAreaResizeGuides(element) {
+    if (!element || element.dataset.type !== 'deck-area') {
+        return;
+    }
+    element.classList.remove('show-resize-guides');
+}
+
 function createItemElement({ width, height, label, color, type = 'item' }, options = {}) {
     const { skipHistory = false, skipMetadata = false, container = workspaceContent } = options;
     const element = document.createElement('div');
@@ -1811,6 +1886,9 @@ function setupItemInteractions(element, resizeHandle) {
             start.pointerAngle = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
         }
         activeItem = element;
+        if (action === 'resize' && element.dataset.type === 'deck-area') {
+            showDeckAreaResizeGuides(element);
+        }
     });
 
     element.addEventListener('pointermove', (event) => {
@@ -1830,6 +1908,9 @@ function setupItemInteractions(element, resizeHandle) {
             element.dataset.height = newHeight.toString();
             element.style.width = `${metersToPixels(newWidth)}px`;
             element.style.height = `${metersToPixels(newHeight)}px`;
+            if (element.dataset.type === 'deck-area') {
+                updateDeckAreaResizeGuides(element);
+            }
         } else if (action === 'rotate') {
             const pointerAngle = Math.atan2(event.clientY - start.centerY, event.clientX - start.centerX);
             const deltaAngle = (pointerAngle - start.pointerAngle) * (180 / Math.PI);
@@ -1845,17 +1926,24 @@ function setupItemInteractions(element, resizeHandle) {
         const completedAction = action;
         pointerId = null;
         action = null;
+        if (completedAction === 'resize' && element.dataset.type === 'deck-area') {
+            hideDeckAreaResizeGuides(element);
+        }
         if (completedAction && element.dataset.type === 'item') {
             handleItemInteractionComplete(element, completedAction);
         }
     });
 
     element.addEventListener('pointercancel', () => {
+        const wasResize = action === 'resize';
         if (pointerId !== null) {
             element.releasePointerCapture(pointerId);
         }
         pointerId = null;
         action = null;
+        if (wasResize && element.dataset.type === 'deck-area') {
+            hideDeckAreaResizeGuides(element);
+        }
     });
 
     element.addEventListener('contextmenu', (event) => {
@@ -2480,6 +2568,13 @@ function handleContextAction(action) {
             renameDeckArea(activeItem);
         } else if (action === 'toggle-deck-name') {
             toggleDeckNameVisibility(activeItem);
+        } else if (action === 'delete-deck') {
+            const shouldDelete = confirm(`Delete deck area "${deckLabel}"?`);
+            if (shouldDelete) {
+                addHistoryEntry(`Deck area deleted${labelSuffix}`);
+                activeItem.remove();
+                activeItem = null;
+            }
         }
     } else {
         if (action === 'modify-item') {
@@ -2526,6 +2621,7 @@ function getContextMenuActions(element) {
             { action: locked ? 'unlock-deck' : 'lock-deck', label: locked ? 'Unlock deck' : 'Lock deck' },
             { action: 'rename-deck', label: 'Rename deck' },
             { action: 'toggle-deck-name', label: nameHidden ? 'Show name' : 'Hide name' },
+            { action: 'delete-deck', label: 'Delete deck area', className: 'danger' },
         ];
     }
     const locked = element.dataset.locked === 'true';
@@ -2670,10 +2766,6 @@ function getDeckLayoutFilenameSegment(name) {
 }
 
 function handleDownloadDecks() {
-    if (!deckModifyMode) {
-        alert('Enter deck modify mode before downloading a layout.');
-        return;
-    }
     if (!currentDeck) {
         alert('Select a deck before downloading a layout.');
         return;
