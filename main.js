@@ -151,9 +151,46 @@ function loadPlanningJobForEditing(job) {
     if (!job || !Array.isArray(job.deck?.items)) {
         return;
     }
-    job.deck.items
+    const entries = job.deck.items
         .map((entry) => normalizeWorkspaceLayoutEntry(entry))
-        .filter((entry) => entry && entry.type === 'item')
+        .filter((entry) => entry !== null);
+
+    entries
+        .filter((entry) => entry.type === 'deck-area')
+        .forEach((entry) => {
+            const element = createItemElement(
+                {
+                    width: entry.width,
+                    height: entry.height,
+                    label: entry.label,
+                    color: '#ffffff',
+                    type: 'deck-area',
+                },
+                { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
+            );
+            element.dataset.planningJobId = job.id;
+            element.dataset.x = entry.x.toString();
+            element.dataset.y = entry.y.toString();
+            element.dataset.rotation = entry.rotation.toString();
+            element.dataset.width = entry.width.toString();
+            element.dataset.height = entry.height.toString();
+            element.dataset.label = entry.label;
+            element.dataset.nameHidden = entry.nameHidden ? 'true' : 'false';
+            setDeckLockState(element, entry.locked);
+            element.classList.add('planning-edit-item', 'planning-edit-deck-area');
+            element.classList.toggle('name-hidden', entry.nameHidden);
+            const nameEl = element.querySelector('.deck-name');
+            if (nameEl) {
+                nameEl.textContent = entry.label;
+                nameEl.style.display = entry.nameHidden ? 'none' : '';
+            }
+            element.style.width = `${metersToPixels(entry.width)}px`;
+            element.style.height = `${metersToPixels(entry.height)}px`;
+            updateElementTransform(element);
+        });
+
+    entries
+        .filter((entry) => entry.type === 'item')
         .forEach((entry) => {
             const element = createItemElement(
                 {
@@ -187,31 +224,37 @@ function loadPlanningJobForEditing(job) {
 }
 
 function serializePlanningEditingItems() {
-    const elements = Array.from(planningEditingLayer.querySelectorAll('.item'));
+    const elements = Array.from(planningEditingLayer.querySelectorAll('.item, .deck-area'));
     return elements.map((element) => {
+        const type = element.dataset.type === 'deck-area' ? 'deck-area' : 'item';
         const width = Number.parseFloat(element.dataset.width);
         const height = Number.parseFloat(element.dataset.height);
         const x = Number.parseFloat(element.dataset.x);
         const y = Number.parseFloat(element.dataset.y);
         const rotation = Number.parseFloat(element.dataset.rotation);
-        const label = getItemLabel(element);
-        const color = rgbToHex(
-            getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe'
-        );
-        const comment = (element.dataset.comment || '').trim();
         const locked = element.dataset.locked === 'true';
-        return {
-            type: 'item',
-            label,
+        const base = {
+            type,
+            label:
+                type === 'deck-area'
+                    ? element.dataset.label || 'Deck area'
+                    : getItemLabel(element),
             width: Number.isFinite(width) ? width : DEFAULT_ITEM_WIDTH_METERS,
             height: Number.isFinite(height) ? height : DEFAULT_ITEM_HEIGHT_METERS,
             x: Number.isFinite(x) ? x : 0,
             y: Number.isFinite(y) ? y : 0,
             rotation: Number.isFinite(rotation) ? rotation : 0,
-            color,
-            comment,
             locked,
         };
+        if (type === 'item') {
+            base.color = rgbToHex(
+                getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe'
+            );
+            base.comment = (element.dataset.comment || '').trim();
+        } else {
+            base.nameHidden = element.dataset.nameHidden === 'true';
+        }
+        return base;
     });
 }
 
@@ -734,7 +777,7 @@ function enterPlanningMode() {
     }
     planningState.active = true;
     planningState.showCurrentDeck = true;
-    planningState.lockCurrentDeck = true;
+    planningState.lockCurrentDeck = false;
     planningState.editingJobId = null;
     clearPlanningEditingLayer();
     renderPlanningJobs();
@@ -1003,7 +1046,9 @@ function deletePlanningJob(jobId) {
 
 function serializeWorkspaceElements() {
     const elements = Array.from(workspaceContent.querySelectorAll('.item, .deck-area')).filter(
-        (element) => !element.closest('#planning-editing-layer')
+        (element) =>
+            !element.closest('#planning-editing-layer') &&
+            !element.closest('#planning-overlays')
     );
     return elements.map((element) => {
         const type = element.dataset.type === 'deck-area' ? 'deck-area' : 'item';
@@ -1040,7 +1085,7 @@ function serializeWorkspaceElements() {
 }
 
 function serializeWorkspaceItemsForPlanning() {
-    return serializeWorkspaceElements().filter((entry) => entry.type !== 'deck-area');
+    return serializeWorkspaceElements();
 }
 
 function normalizeWorkspaceLayoutEntry(entry) {
