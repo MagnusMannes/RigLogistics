@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "decks": [
+    {
+      "id": "deck-1",
+      "name": "Statfjord A deck",
+      "layout": [],
+      "jobs": []
+    },
+    {
+      "id": "deck-2",
+      "name": "Statfjord B deck",
+      "layout": [],
+      "jobs": []
+    },
+    {
+      "id": "deck-3",
+      "name": "Statfjord C deck",
+      "layout": [],
+      "jobs": []
+    }
+  ]
+}
