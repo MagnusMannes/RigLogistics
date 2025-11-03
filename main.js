@@ -1,5 +1,6 @@
-const decksKey = 'riglogistics:decks';
 const selectedDeckKey = 'riglogistics:selectedDeck';
+const API_STATE_ENDPOINT = '/api/state';
+const STATE_SYNC_DEBOUNCE_MS = 300;
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
 const PIXELS_PER_METER = 60;
 const BASE_SCALE = 0.4;
@@ -76,6 +77,7 @@ inputHeight.value = DEFAULT_ITEM_HEIGHT_METERS.toString();
 inputWidth.min = inputHeight.min = MIN_ITEM_SIZE_METERS.toString();
 inputWidth.step = inputHeight.step = '0.1';
 
+let lastKnownVersion = Number(window.__INITIAL_STATE__?.version) || 0;
 let decks = loadDecks();
 let currentDeck = null;
 let history = [];
@@ -99,6 +101,11 @@ const planningState = {
     editingJobId: null,
 };
 let deckModifyMode = false;
+let stateSyncTimer = null;
+let workspaceSaveTimer = null;
+let isApplyingRemoteState = false;
+let isLoadingWorkspace = false;
+let socket = null;
 
 function getDeckAreaElements() {
     return Array.from(workspaceContent.querySelectorAll('.deck-area'));
@@ -551,10 +558,15 @@ function generatePlanningJobLabel(existingJobs = []) {
     return candidate;
 }
 
-function createDeckRecord(name, { id, jobs } = {}) {
+function createDeckRecord(name, { id, jobs, layout } = {}) {
     return {
         id: typeof id === 'string' && id.trim() ? id : generateDeckId(),
         name: typeof name === 'string' && name.trim() ? name.trim() : 'Deck',
+        layout: Array.isArray(layout)
+            ? layout
+                  .map((entry) => normalizeWorkspaceLayoutEntry(entry))
+                  .filter((value) => value !== null)
+            : [],
         jobs: Array.isArray(jobs) ? jobs.map((job) => normalizePlanningJob(job)) : [],
     };
 }
@@ -615,7 +627,7 @@ function normalizeDeckEntry(entry) {
     if (!entry || typeof entry !== 'object') {
         return createDeckRecord('Deck');
     }
-    return createDeckRecord(entry.name, { id: entry.id, jobs: entry.jobs });
+    return createDeckRecord(entry.name, { id: entry.id, jobs: entry.jobs, layout: entry.layout });
 }
 
 function planningItemToSerializable(item) {
@@ -636,6 +648,57 @@ function planningItemToSerializable(item) {
     return result;
 }
 
+function attachmentToSerializable(attachment) {
+    if (!attachment || typeof attachment !== 'object') {
+        return null;
+    }
+    return {
+        id: typeof attachment.id === 'string' ? attachment.id : '',
+        name: typeof attachment.name === 'string' ? attachment.name : 'Attachment',
+        type: typeof attachment.type === 'string' ? attachment.type : '',
+        size: Number.isFinite(Number(attachment.size)) ? Number(attachment.size) : 0,
+        dataUrl: typeof attachment.dataUrl === 'string' ? attachment.dataUrl : '',
+        addedAt:
+            typeof attachment.addedAt === 'string' && attachment.addedAt.trim()
+                ? attachment.addedAt
+                : new Date().toISOString(),
+    };
+}
+
+function layoutEntryToSerializable(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+    const type = entry.type === 'deck-area' ? 'deck-area' : 'item';
+    const base = {
+        type,
+        label:
+            typeof entry.label === 'string' && entry.label.trim()
+                ? entry.label.trim()
+                : type === 'deck-area'
+                ? 'Deck area'
+                : 'Item',
+        width: Number.isFinite(Number(entry.width)) ? Number(entry.width) : DEFAULT_ITEM_WIDTH_METERS,
+        height: Number.isFinite(Number(entry.height)) ? Number(entry.height) : DEFAULT_ITEM_HEIGHT_METERS,
+        x: Number.isFinite(Number(entry.x)) ? Number(entry.x) : 0,
+        y: Number.isFinite(Number(entry.y)) ? Number(entry.y) : 0,
+        rotation: Number.isFinite(Number(entry.rotation)) ? Number(entry.rotation) : 0,
+        locked: entry.locked === true || entry.locked === 'true',
+    };
+    if (type === 'item') {
+        base.color =
+            typeof entry.color === 'string' && entry.color.trim() ? entry.color : '#3a7afe';
+        base.comment = typeof entry.comment === 'string' ? entry.comment : '';
+        const attachmentsSource = Array.isArray(entry.attachments) ? entry.attachments : [];
+        base.attachments = attachmentsSource
+            .map((attachment) => attachmentToSerializable(attachment))
+            .filter((value) => value !== null);
+    } else {
+        base.nameHidden = entry.nameHidden === true || entry.nameHidden === 'true';
+    }
+    return base;
+}
+
 function jobToSerializable(job) {
     return {
         id: job.id,
@@ -652,6 +715,11 @@ function deckToSerializable(deck) {
     return {
         id: deck.id,
         name: deck.name,
+        layout: Array.isArray(deck.layout)
+            ? deck.layout
+                  .map((entry) => layoutEntryToSerializable(entry))
+                  .filter((value) => value !== null)
+            : [],
         jobs: Array.isArray(deck.jobs) ? deck.jobs.map((job) => jobToSerializable(job)) : [],
     };
 }
@@ -1057,6 +1125,12 @@ function serializeWorkspaceElements() {
             );
             itemData.color = color;
             itemData.comment = (element.dataset.comment || '').trim();
+            const itemId = element.dataset.itemId;
+            const metadata = itemId ? itemMetadata.get(itemId) : null;
+            const attachmentsSource = Array.isArray(metadata?.attachments) ? metadata.attachments : [];
+            itemData.attachments = attachmentsSource
+                .map((attachment) => attachmentToSerializable(attachment))
+                .filter((value) => value !== null);
         } else {
             itemData.nameHidden = element.dataset.nameHidden === 'true';
         }
@@ -1071,6 +1145,25 @@ function serializeWorkspaceItemsForPlanning({ includeDeckAreas = false } = {}) {
         }
         return entry.type === 'item';
     });
+}
+
+function normalizeAttachmentEntry(attachment) {
+    if (!attachment || typeof attachment !== 'object') {
+        return null;
+    }
+    const id =
+        typeof attachment.id === 'string' && attachment.id.trim()
+            ? attachment.id.trim()
+            : generateAttachmentId();
+    const name = typeof attachment.name === 'string' ? attachment.name : 'Attachment';
+    const type = typeof attachment.type === 'string' ? attachment.type : '';
+    const size = Number.isFinite(Number(attachment.size)) ? Number(attachment.size) : 0;
+    const dataUrl = typeof attachment.dataUrl === 'string' ? attachment.dataUrl : '';
+    const addedAt =
+        typeof attachment.addedAt === 'string' && attachment.addedAt.trim()
+            ? attachment.addedAt
+            : new Date().toISOString();
+    return { id, name, type, size, dataUrl, addedAt };
 }
 
 function normalizeWorkspaceLayoutEntry(entry) {
@@ -1104,100 +1197,117 @@ function normalizeWorkspaceLayoutEntry(entry) {
                 : '#3a7afe';
         normalized.color = color;
         normalized.comment = typeof entry.comment === 'string' ? entry.comment : '';
+        const attachmentsSource = Array.isArray(entry.attachments) ? entry.attachments : [];
+        normalized.attachments = attachmentsSource
+            .map((attachment) => normalizeAttachmentEntry(attachment))
+            .filter((value) => value !== null);
     } else {
         normalized.nameHidden = entry.nameHidden === true || entry.nameHidden === 'true';
     }
     return normalized;
 }
 
-function loadWorkspaceLayout(entries) {
+function loadWorkspaceLayout(entries, { recordHistory = false } = {}) {
     if (!Array.isArray(entries)) {
         return;
     }
-    const deckAreas = [];
-    const items = [];
-    entries.forEach((entry) => {
-        if (!entry || typeof entry !== 'object') {
-            return;
-        }
-        if (entry.type === 'deck-area') {
-            deckAreas.push(entry);
-        } else {
-            items.push(entry);
-        }
-    });
-
-    const removable = Array.from(workspaceContent.querySelectorAll('.item, .deck-area'));
-    removable.forEach((element) => {
-        if (element.dataset.type === 'item') {
-            removeItemRecord(element);
-        }
-        element.remove();
-    });
-
-    itemMetadata.clear();
-    itemHistories.clear();
-
-    const instantiate = (data) => {
-        const normalized = normalizeWorkspaceLayoutEntry(data);
-        if (!normalized) {
-            return null;
-        }
-        const element = createItemElement(
-            {
-                width: normalized.width,
-                height: normalized.height,
-                label: normalized.label,
-                color: normalized.type === 'item' ? normalized.color : '#ffffff',
-                type: normalized.type,
-            },
-            { skipHistory: true }
-        );
-        element.dataset.x = normalized.x.toString();
-        element.dataset.y = normalized.y.toString();
-        element.dataset.rotation = normalized.rotation.toString();
-        element.dataset.width = normalized.width.toString();
-        element.dataset.height = normalized.height.toString();
-        element.style.width = `${metersToPixels(normalized.width)}px`;
-        element.style.height = `${metersToPixels(normalized.height)}px`;
-        updateElementTransform(element);
-
-        if (normalized.type === 'item') {
-            element.style.background = normalized.color;
-            element.dataset.comment = normalized.comment || '';
-            element.dataset.locked = normalized.locked ? 'true' : 'false';
-            element.classList.toggle('locked', normalized.locked);
-            updateAttachmentIndicator(element);
-            updateItemRecord(element, null, { updateComment: true, updateDeck: true });
-        } else {
-            element.dataset.label = normalized.label;
-            const nameEl = element.querySelector('.deck-name');
-            if (nameEl) {
-                nameEl.textContent = normalized.label;
-                nameEl.style.display = normalized.nameHidden ? 'none' : '';
+    isLoadingWorkspace = true;
+    try {
+        const deckAreas = [];
+        const items = [];
+        entries.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') {
+                return;
             }
-            element.dataset.nameHidden = normalized.nameHidden ? 'true' : 'false';
-            element.classList.toggle('name-hidden', normalized.nameHidden);
-            setDeckLockState(element, normalized.locked);
+            if (entry.type === 'deck-area') {
+                deckAreas.push(entry);
+            } else {
+                items.push(entry);
+            }
+        });
+
+        const removable = Array.from(workspaceContent.querySelectorAll('.item, .deck-area'));
+        removable.forEach((element) => {
+            if (element.dataset.type === 'item') {
+                removeItemRecord(element);
+            }
+            element.remove();
+        });
+
+        itemMetadata.clear();
+        itemHistories.clear();
+
+        const instantiate = (data) => {
+            const normalized = normalizeWorkspaceLayoutEntry(data);
+            if (!normalized) {
+                return null;
+            }
+            const element = createItemElement(
+                {
+                    width: normalized.width,
+                    height: normalized.height,
+                    label: normalized.label,
+                    color: normalized.type === 'item' ? normalized.color : '#ffffff',
+                    type: normalized.type,
+                },
+                { skipHistory: true }
+            );
+            element.dataset.x = normalized.x.toString();
+            element.dataset.y = normalized.y.toString();
+            element.dataset.rotation = normalized.rotation.toString();
+            element.dataset.width = normalized.width.toString();
+            element.dataset.height = normalized.height.toString();
+            element.style.width = `${metersToPixels(normalized.width)}px`;
+            element.style.height = `${metersToPixels(normalized.height)}px`;
+            updateElementTransform(element);
+
+            if (normalized.type === 'item') {
+                element.style.background = normalized.color;
+                element.dataset.comment = normalized.comment || '';
+                element.dataset.locked = normalized.locked ? 'true' : 'false';
+                element.classList.toggle('locked', normalized.locked);
+                updateItemRecord(element, null, { updateComment: true, updateDeck: true });
+                const metadata = ensureItemMetadataRecord(element);
+                if (metadata) {
+                    metadata.attachments = Array.isArray(normalized.attachments)
+                        ? normalized.attachments.map((attachment) => ({ ...attachment }))
+                        : [];
+                }
+                updateAttachmentIndicator(element);
+            } else {
+                element.dataset.label = normalized.label;
+                const nameEl = element.querySelector('.deck-name');
+                if (nameEl) {
+                    nameEl.textContent = normalized.label;
+                    nameEl.style.display = normalized.nameHidden ? 'none' : '';
+                }
+                element.dataset.nameHidden = normalized.nameHidden ? 'true' : 'false';
+                element.classList.toggle('name-hidden', normalized.nameHidden);
+                setDeckLockState(element, normalized.locked);
+            }
+            delete element.dataset.autolocked;
+            return element;
+        };
+
+        [...deckAreas].reverse().forEach((entry) => {
+            instantiate(entry);
+        });
+        items.forEach((entry) => {
+            instantiate(entry);
+        });
+
+        if (recordHistory) {
+            addHistoryEntry('Workspace layout imported');
         }
-        delete element.dataset.autolocked;
-        return element;
-    };
+        refreshItemList();
 
-    [...deckAreas].reverse().forEach((entry) => {
-        instantiate(entry);
-    });
-    items.forEach((entry) => {
-        instantiate(entry);
-    });
-
-    addHistoryEntry('Workspace layout imported');
-    refreshItemList();
-
-    if (deckModifyMode) {
-        releaseAutolockedDeckAreas();
-    } else {
-        enforceDeckAreaLocks();
+        if (deckModifyMode) {
+            releaseAutolockedDeckAreas();
+        } else {
+            enforceDeckAreaLocks();
+        }
+    } finally {
+        isLoadingWorkspace = false;
     }
 }
 
@@ -1428,6 +1538,9 @@ function registerItem(element, initialMessage) {
         recordItemHistory(element, initialMessage, timestamp);
     }
     refreshItemList();
+    if (!isLoadingWorkspace) {
+        scheduleWorkspaceSave();
+    }
 }
 
 function updateItemRecord(element, message, { updateComment = true, updateDeck = true } = {}) {
@@ -1470,6 +1583,9 @@ function updateItemRecord(element, message, { updateComment = true, updateDeck =
         recordItemHistory(element, message, timestamp);
     }
     refreshItemList();
+    if (!isLoadingWorkspace) {
+        scheduleWorkspaceSave();
+    }
 }
 
 function removeItemRecord(element) {
@@ -1486,6 +1602,9 @@ function removeItemRecord(element) {
     itemMetadata.delete(itemId);
     itemHistories.delete(itemId);
     refreshItemList();
+    if (!isLoadingWorkspace) {
+        scheduleWorkspaceSave();
+    }
 }
 
 function updateSortButtons() {
@@ -1612,37 +1731,168 @@ function refreshItemList() {
 }
 
 function loadDecks() {
-    const stored = localStorage.getItem(decksKey);
-    let shouldPersist = false;
-    if (stored) {
-        try {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length) {
-                const normalized = parsed.map((entry) => {
-                    const normalizedEntry = normalizeDeckEntry(entry);
-                    if (typeof entry === 'string' || entry?.name !== normalizedEntry.name || !entry?.jobs) {
-                        shouldPersist = true;
-                    }
-                    return normalizedEntry;
-                });
-                if (shouldPersist) {
-                    const serializable = normalized.map((deck) => deckToSerializable(deck));
-                    localStorage.setItem(decksKey, JSON.stringify(serializable));
-                }
-                return normalized;
-            }
-        } catch (err) {
-            console.warn('Unable to parse stored decks', err);
+    const initialState = window.__INITIAL_STATE__;
+    if (initialState && Array.isArray(initialState.decks) && initialState.decks.length) {
+        const normalized = initialState.decks.map((entry) => normalizeDeckEntry(entry));
+        if (Number.isFinite(Number(initialState.version))) {
+            lastKnownVersion = Number(initialState.version);
         }
+        return normalized;
     }
-    const defaults = defaultDecks.map((name) => createDeckRecord(name));
-    localStorage.setItem(decksKey, JSON.stringify(defaults.map((deck) => deckToSerializable(deck))));
-    return defaults;
+    return defaultDecks.map((name) => createDeckRecord(name));
 }
 
 function saveDecks() {
-    const serializable = decks.map((deck) => deckToSerializable(deck));
-    localStorage.setItem(decksKey, JSON.stringify(serializable));
+    queueStateSync();
+}
+
+function getSerializableState() {
+    return {
+        version: lastKnownVersion,
+        decks: Array.isArray(decks) ? decks.map((deck) => deckToSerializable(deck)) : [],
+    };
+}
+
+function queueStateSync({ immediate = false } = {}) {
+    if (isApplyingRemoteState) {
+        return;
+    }
+    if (immediate) {
+        if (stateSyncTimer) {
+            clearTimeout(stateSyncTimer);
+            stateSyncTimer = null;
+        }
+        syncStateWithServer();
+        return;
+    }
+    if (stateSyncTimer) {
+        clearTimeout(stateSyncTimer);
+    }
+    stateSyncTimer = setTimeout(() => {
+        stateSyncTimer = null;
+        syncStateWithServer();
+    }, STATE_SYNC_DEBOUNCE_MS);
+}
+
+async function syncStateWithServer() {
+    if (isApplyingRemoteState) {
+        return;
+    }
+    if (!Array.isArray(decks) || !decks.length) {
+        return;
+    }
+    const payload = getSerializableState();
+    try {
+        const response = await fetch(API_STATE_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+        }
+        const result = await response.json();
+        applyStateFromServer(result, { replaceWorkspace: false, force: true });
+    } catch (error) {
+        console.error('Failed to sync decks with server', error);
+    }
+}
+
+function performWorkspaceSave() {
+    if (!currentDeck) {
+        return;
+    }
+    const layout = serializeWorkspaceElements();
+    currentDeck.layout = layout;
+    const target = decks.find((deck) => deck.id === currentDeck.id);
+    if (target) {
+        target.layout = layout;
+    }
+    queueStateSync();
+}
+
+function scheduleWorkspaceSave({ immediate = false } = {}) {
+    if (isLoadingWorkspace || isApplyingRemoteState || !currentDeck) {
+        return;
+    }
+    if (immediate) {
+        if (workspaceSaveTimer) {
+            clearTimeout(workspaceSaveTimer);
+            workspaceSaveTimer = null;
+        }
+        performWorkspaceSave();
+        return;
+    }
+    if (workspaceSaveTimer) {
+        clearTimeout(workspaceSaveTimer);
+    }
+    workspaceSaveTimer = setTimeout(() => {
+        workspaceSaveTimer = null;
+        performWorkspaceSave();
+    }, 200);
+}
+
+function applyStateFromServer(nextState, { replaceWorkspace = true, force = false } = {}) {
+    if (!nextState || !Array.isArray(nextState.decks)) {
+        return;
+    }
+    const nextVersion = Number(nextState.version) || 0;
+    if (!force && nextVersion && nextVersion <= lastKnownVersion) {
+        return;
+    }
+    const previousDeckId = currentDeck?.id || null;
+    isApplyingRemoteState = true;
+    decks = nextState.decks.map((entry) => normalizeDeckEntry(entry));
+    if (nextVersion) {
+        lastKnownVersion = nextVersion;
+    }
+    renderDeckList();
+    if (previousDeckId) {
+        const updatedDeck = decks.find((deck) => deck.id === previousDeckId);
+        if (updatedDeck) {
+            currentDeck = updatedDeck;
+            if (replaceWorkspace) {
+                history = [];
+                loadWorkspaceLayout(Array.isArray(currentDeck.layout) ? currentDeck.layout : []);
+            }
+        } else {
+            goBackToSelection();
+        }
+    }
+    renderPlanningJobs();
+    refreshItemList();
+    isApplyingRemoteState = false;
+}
+
+async function fetchLatestState() {
+    try {
+        const response = await fetch(API_STATE_ENDPOINT);
+        if (!response.ok) {
+            return;
+        }
+        const payload = await response.json();
+        applyStateFromServer(payload, { replaceWorkspace: Boolean(currentDeck), force: true });
+    } catch (error) {
+        console.error('Failed to fetch latest state', error);
+    }
+}
+
+function connectRealtime() {
+    if (typeof io !== 'function') {
+        console.warn('Realtime collaboration requires socket.io.');
+        return;
+    }
+    const socketUrl =
+        typeof window.__SOCKET_URL__ === 'string' && window.__SOCKET_URL__.trim()
+            ? window.__SOCKET_URL__
+            : undefined;
+    socket = io(socketUrl, { transports: ['websocket', 'polling'] });
+    socket.on('state:init', (payload) => {
+        applyStateFromServer(payload, { replaceWorkspace: true, force: true });
+    });
+    socket.on('state:update', (payload) => {
+        applyStateFromServer(payload, { replaceWorkspace: true });
+    });
 }
 
 function renderDeckList() {
@@ -1676,7 +1926,13 @@ function selectDeck(deck) {
     planningState.showCurrentDeck = true;
     planningState.lockCurrentDeck = false;
     planningState.editingJobId = null;
-    localStorage.setItem(selectedDeckKey, currentDeck.name);
+    const selectionValue =
+        typeof currentDeck.id === 'string' && currentDeck.id
+            ? currentDeck.id
+            : currentDeck.name;
+    if (selectionValue) {
+        localStorage.setItem(selectedDeckKey, selectionValue);
+    }
     deckSelectionView.classList.remove('active');
     workspaceView.classList.add('active');
     history = [];
@@ -1689,7 +1945,7 @@ function selectDeck(deck) {
     clearMeasurements();
     itemMetadata.clear();
     itemHistories.clear();
-    refreshItemList();
+    loadWorkspaceLayout(Array.isArray(currentDeck.layout) ? currentDeck.layout : []);
     workspaceState.scale = BASE_SCALE;
     applyWorkspaceTransform();
     closeToolsMenu();
@@ -2588,9 +2844,11 @@ function handleContextAction(action) {
         if (action === 'lock-deck') {
             setDeckLockState(activeItem, true);
             addHistoryEntry(`Deck locked${labelSuffix}`);
+            scheduleWorkspaceSave({ immediate: true });
         } else if (action === 'unlock-deck') {
             setDeckLockState(activeItem, false);
             addHistoryEntry(`Deck unlocked${labelSuffix}`);
+            scheduleWorkspaceSave({ immediate: true });
         } else if (action === 'rename-deck') {
             renameDeckArea(activeItem);
         } else if (action === 'toggle-deck-name') {
@@ -2601,6 +2859,7 @@ function handleContextAction(action) {
                 addHistoryEntry(`Deck area deleted${labelSuffix}`);
                 activeItem.remove();
                 activeItem = null;
+                scheduleWorkspaceSave({ immediate: true });
             }
         }
     } else {
@@ -2621,6 +2880,7 @@ function handleContextAction(action) {
                 recordItemHistory(activeItem, message);
                 removeItemRecord(activeItem);
                 activeItem.remove();
+                scheduleWorkspaceSave({ immediate: true });
             }
         } else if (action === 'lock-item') {
             setItemLockState(activeItem, true);
@@ -2682,6 +2942,7 @@ function renameDeckArea(element) {
         nameEl.textContent = trimmed;
     }
     addHistoryEntry(`Deck renamed: ${trimmed}`);
+    scheduleWorkspaceSave({ immediate: true });
 }
 
 function toggleDeckNameVisibility(element) {
@@ -2695,6 +2956,7 @@ function toggleDeckNameVisibility(element) {
     const deckLabel = element.dataset.label || 'Deck';
     const labelSuffix = deckLabel ? `: ${deckLabel}` : '';
     addHistoryEntry(shouldHide ? `Deck name hidden${labelSuffix}` : `Deck name shown${labelSuffix}`);
+    scheduleWorkspaceSave();
 }
 
 function handleAddDeckArea() {
@@ -2711,6 +2973,7 @@ function handleAddDeckArea() {
         type: 'deck-area',
     });
     closeToolsMenu();
+    scheduleWorkspaceSave();
 }
 
 function initializeDeckSelection() {
@@ -2852,7 +3115,8 @@ function handleUploadDecks() {
                 alert('No valid layout entries were found in the selected file.');
                 return;
             }
-            loadWorkspaceLayout(normalized);
+            loadWorkspaceLayout(normalized, { recordHistory: true });
+            scheduleWorkspaceSave({ immediate: true });
             alert(`Loaded ${normalized.length} layout item${normalized.length === 1 ? '' : 's'} from backup.`);
         } catch (error) {
             console.error('Unable to import layout', error);
@@ -2927,7 +3191,14 @@ function setupWorkspaceInteractions() {
     }, { passive: false });
 }
 
-function handleGlobalPointerDown() {
+function handleGlobalPointerDown(event) {
+    const target = event?.target;
+    if (
+        (selectionSettingsButton && selectionSettingsButton.contains(target)) ||
+        (selectionSettingsMenu && selectionSettingsMenu.contains(target))
+    ) {
+        return;
+    }
     closeToolsMenu();
     closeContextMenu();
     closeSelectionSettingsMenu();
@@ -3128,3 +3399,5 @@ refreshItemList();
 initializeDeckSelection();
 setupWorkspaceInteractions();
 applyWorkspaceTransform();
+connectRealtime();
+fetchLatestState();
