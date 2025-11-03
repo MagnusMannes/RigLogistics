@@ -743,7 +743,7 @@ button.icon-button {
 .deck-area .deck-area-guide {
     position: absolute;
     color: #0f172a;
-    font-size: 1rem;
+    font-size: 1.2rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -758,13 +758,14 @@ button.icon-button {
 
 .deck-area .deck-area-guide-width .deck-area-guide-label {
     position: absolute;
-    top: -2rem;
+    top: calc(100% + 0.6rem);
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, 0);
     background: rgba(248, 250, 252, 0.95);
-    padding: 0.25rem 0.6rem;
+    padding: 0.35rem 0.8rem;
     border-radius: 999px;
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+    white-space: nowrap;
 }
 
 .deck-area .deck-area-guide-height {
@@ -776,13 +777,14 @@ button.icon-button {
 
 .deck-area .deck-area-guide-height .deck-area-guide-label {
     position: absolute;
-    left: 1.5rem;
+    left: calc(100% + 0.6rem);
     top: 50%;
     transform: translateY(-50%);
     background: rgba(248, 250, 252, 0.95);
-    padding: 0.25rem 0.6rem;
+    padding: 0.35rem 0.8rem;
     border-radius: 999px;
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+    white-space: nowrap;
 }
 
 .deck-area.locked {

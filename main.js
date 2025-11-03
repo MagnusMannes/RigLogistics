@@ -2598,8 +2598,6 @@ function handleContextAction(action) {
                 removeItemRecord(activeItem);
                 activeItem.remove();
             }
-        } else if (action === 'resize') {
-            promptResizeItem(activeItem);
         } else if (action === 'lock-item') {
             setItemLockState(activeItem, true);
         } else if (action === 'unlock-item') {
@@ -2636,7 +2634,6 @@ function getContextMenuActions(element) {
         if (!planningItem) {
             actions.push({ action: 'attach-file', label: 'Attach file…' });
         }
-        actions.push({ action: 'resize', label: 'Resize…' });
     }
     actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
     actions.push({ action: 'comment', label: hasComment ? 'Edit comment' : 'Add comment' });
