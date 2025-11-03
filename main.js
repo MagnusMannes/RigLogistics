@@ -13,6 +13,9 @@ const deckSelectionView = document.getElementById('deck-selection');
 const workspaceView = document.getElementById('workspace-view');
 const deckListEl = document.getElementById('deck-list');
 const createDeckBtn = document.getElementById('create-deck');
+const deleteDeckBtn = document.getElementById('delete-deck');
+const selectionSettingsButton = document.getElementById('selection-settings-button');
+const selectionSettingsMenu = document.getElementById('selection-settings-menu');
 const backButton = document.getElementById('back-button');
 const historySidebar = document.getElementById('history-sidebar');
 const toggleSidebarBtn = document.getElementById('toggle-sidebar');
@@ -2520,6 +2523,27 @@ function closeToolsMenu() {
     closeDeckSettingsPanel();
 }
 
+function updateSelectionSettingsMenuState(open) {
+    if (!selectionSettingsMenu || !selectionSettingsButton) {
+        return;
+    }
+    selectionSettingsMenu.classList.toggle('open', open);
+    selectionSettingsMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+    selectionSettingsButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function toggleSelectionSettingsMenu() {
+    if (!selectionSettingsMenu) {
+        return;
+    }
+    const shouldOpen = !selectionSettingsMenu.classList.contains('open');
+    updateSelectionSettingsMenuState(shouldOpen);
+}
+
+function closeSelectionSettingsMenu() {
+    updateSelectionSettingsMenuState(false);
+}
+
 function openContextMenu(x, y) {
     if (!activeItem) return;
 
@@ -2719,6 +2743,7 @@ function handleCreateDeck() {
     decks.push(createDeckRecord(trimmed));
     saveDecks();
     renderDeckList();
+    closeSelectionSettingsMenu();
 }
 
 function handleDeleteDeck() {
@@ -2751,6 +2776,7 @@ function handleDeleteDeck() {
     if (currentDeck && currentDeck.id === deckToRemove.id) {
         goBackToSelection();
     }
+    closeSelectionSettingsMenu();
 }
 
 function getDeckLayoutFilenameSegment(name) {
@@ -2904,6 +2930,7 @@ function setupWorkspaceInteractions() {
 function handleGlobalPointerDown() {
     closeToolsMenu();
     closeContextMenu();
+    closeSelectionSettingsMenu();
 }
 
 function setHistorySortMode(mode) {
@@ -2975,9 +3002,30 @@ if (deckAddAreaButton) {
     });
 }
 
+if (selectionSettingsButton) {
+    selectionSettingsButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleSelectionSettingsMenu();
+    });
+}
+
+if (selectionSettingsMenu) {
+    selectionSettingsMenu.addEventListener('click', (event) => {
+        event.stopPropagation();
+    });
+}
+
 document.addEventListener('click', handleGlobalPointerDown);
 
 deckSelectionView.addEventListener('click', (event) => {
+    if (
+        selectionSettingsMenu &&
+        selectionSettingsButton &&
+        !selectionSettingsMenu.contains(event.target) &&
+        !selectionSettingsButton.contains(event.target)
+    ) {
+        closeSelectionSettingsMenu();
+    }
     event.stopPropagation();
 });
 
@@ -3024,6 +3072,9 @@ workspaceContainer.addEventListener('pointerdown', handleMeasurePointerDown, tru
 createItemBtn.addEventListener('click', handleCreateItem);
 toggleSidebarBtn.addEventListener('click', toggleSidebar);
 createDeckBtn.addEventListener('click', handleCreateDeck);
+if (deleteDeckBtn) {
+    deleteDeckBtn.addEventListener('click', handleDeleteDeck);
+}
 backButton.addEventListener('click', goBackToSelection);
 
 if (historySearchInput) {
