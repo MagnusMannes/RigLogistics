@@ -3191,7 +3191,14 @@ function setupWorkspaceInteractions() {
     }, { passive: false });
 }
 
-function handleGlobalPointerDown() {
+function handleGlobalPointerDown(event) {
+    const target = event?.target;
+    if (
+        (selectionSettingsButton && selectionSettingsButton.contains(target)) ||
+        (selectionSettingsMenu && selectionSettingsMenu.contains(target))
+    ) {
+        return;
+    }
     closeToolsMenu();
     closeContextMenu();
     closeSelectionSettingsMenu();
