@@ -44,6 +44,10 @@ const zoomValueEl = document.getElementById('zoom-value');
 const measurementInstructions = document.getElementById('measurement-instructions');
 const deckModifyNotice = document.getElementById('deck-modify-notice');
 
+if (deckModifyNotice) {
+    deckModifyNotice.setAttribute('aria-hidden', 'true');
+}
+
 const inputWidth = document.getElementById('input-width');
 const inputHeight = document.getElementById('input-height');
 const inputLabel = document.getElementById('input-label');
@@ -324,11 +328,10 @@ function setDeckModifyMode(active) {
         return;
     }
     deckModifyMode = shouldActivate;
-    if (workspaceHeader) {
-        workspaceHeader.classList.toggle('modify-mode', deckModifyMode);
-    }
     if (deckModifyNotice) {
         deckModifyNotice.hidden = !deckModifyMode;
+        deckModifyNotice.setAttribute('aria-hidden', deckModifyMode ? 'false' : 'true');
+        deckModifyNotice.classList.toggle('active', deckModifyMode);
     }
     updateDeckSettingsButtons();
     if (!deckModifyMode) {
