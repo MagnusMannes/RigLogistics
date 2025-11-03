@@ -82,6 +82,21 @@ body {
     color: var(--text-muted);
 }
 
+.selection-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.selection-settings {
+    position: relative;
+    display: inline-flex;
+}
+
+.selection-settings-menu {
+    top: calc(100% + 0.4rem);
+    right: 0;
+}
+
 .deck-list {
     display: grid;
     gap: 0.75rem;

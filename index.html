@@ -16,7 +16,36 @@
                 <h1>Rig Logistics</h1>
                 <p class="subtitle">Select a deck to continue</p>
                 <div id="deck-list" class="deck-list"></div>
-                <button id="create-deck" class="primary">Create new deck</button>
+                <div class="selection-actions">
+                    <div class="selection-settings">
+                        <button
+                            id="selection-settings-button"
+                            class="ghost"
+                            type="button"
+                            aria-haspopup="true"
+                            aria-expanded="false"
+                            aria-controls="selection-settings-menu"
+                        >
+                            Settings
+                        </button>
+                        <div
+                            id="selection-settings-menu"
+                            class="menu selection-settings-menu"
+                            role="menu"
+                            aria-hidden="true"
+                        >
+                            <button id="create-deck" type="button" role="menuitem">Create new deck</button>
+                            <button
+                                id="delete-deck"
+                                type="button"
+                                role="menuitem"
+                                class="danger"
+                            >
+                                Delete deck
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
