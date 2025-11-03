@@ -563,8 +563,7 @@ button.icon-button {
     pointer-events: none;
 }
 
-.workspace-container.planning-hide-current .workspace-content > .item,
-.workspace-container.planning-hide-current .workspace-content > .deck-area {
+.workspace-container.planning-hide-current .workspace-content > .item {
     opacity: 0;
     visibility: hidden;
 }
@@ -604,6 +603,14 @@ button.icon-button {
 
 .planning-editing-layer .item {
     pointer-events: none;
+}
+
+.planning-editing-layer .deck-area {
+    pointer-events: none;
+}
+
+.planning-editing-layer .planning-edit-deck-area .resize-handle {
+    display: none;
 }
 
 .workspace-container.planning-mode-active .planning-editing-layer .item {
