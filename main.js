@@ -665,6 +665,41 @@ function attachmentToSerializable(attachment) {
     };
 }
 
+function normalizeHistoryRecord(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+    const message = typeof entry.message === 'string' && entry.message.trim() ? entry.message.trim() : '';
+    if (!message) {
+        return null;
+    }
+    let timestamp = null;
+    if (entry.timestamp instanceof Date) {
+        timestamp = entry.timestamp.toISOString();
+    } else if (typeof entry.timestamp === 'string' && entry.timestamp.trim()) {
+        const parsed = new Date(entry.timestamp);
+        if (!Number.isNaN(parsed.getTime())) {
+            timestamp = parsed.toISOString();
+        }
+    }
+    if (!timestamp) {
+        timestamp = new Date().toISOString();
+    }
+    return { message, timestamp };
+}
+
+function historyRecordToEvent(entry) {
+    const normalized = normalizeHistoryRecord(entry);
+    if (!normalized) {
+        return null;
+    }
+    const parsed = new Date(normalized.timestamp);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+    return { message: normalized.message, timestamp: parsed };
+}
+
 function layoutEntryToSerializable(entry) {
     if (!entry || typeof entry !== 'object') {
         return null;
@@ -689,10 +724,28 @@ function layoutEntryToSerializable(entry) {
         base.color =
             typeof entry.color === 'string' && entry.color.trim() ? entry.color : '#3a7afe';
         base.comment = typeof entry.comment === 'string' ? entry.comment : '';
+        if (typeof entry.id === 'string' && entry.id.trim()) {
+            base.id = entry.id.trim();
+        }
         const attachmentsSource = Array.isArray(entry.attachments) ? entry.attachments : [];
         base.attachments = attachmentsSource
             .map((attachment) => attachmentToSerializable(attachment))
             .filter((value) => value !== null);
+        const historySource = Array.isArray(entry.history) ? entry.history : [];
+        const history = historySource
+            .map((record) => normalizeHistoryRecord(record))
+            .filter((value) => value !== null);
+        if (history.length) {
+            base.history = history;
+        }
+        if (typeof entry.lastModified === 'string' && entry.lastModified.trim()) {
+            const parsed = new Date(entry.lastModified);
+            if (!Number.isNaN(parsed.getTime())) {
+                base.lastModified = parsed.toISOString();
+            }
+        } else if (entry.lastModified instanceof Date) {
+            base.lastModified = entry.lastModified.toISOString();
+        }
     } else {
         base.nameHidden = entry.nameHidden === true || entry.nameHidden === 'true';
     }
@@ -1126,11 +1179,38 @@ function serializeWorkspaceElements() {
             itemData.color = color;
             itemData.comment = (element.dataset.comment || '').trim();
             const itemId = element.dataset.itemId;
+            if (itemId) {
+                itemData.id = itemId;
+            }
             const metadata = itemId ? itemMetadata.get(itemId) : null;
             const attachmentsSource = Array.isArray(metadata?.attachments) ? metadata.attachments : [];
             itemData.attachments = attachmentsSource
                 .map((attachment) => attachmentToSerializable(attachment))
                 .filter((value) => value !== null);
+            const historySource = itemId && itemHistories.has(itemId) ? itemHistories.get(itemId) : [];
+            const serializedHistory = Array.isArray(historySource)
+                ? historySource.map((record) => normalizeHistoryRecord(record)).filter((value) => value !== null)
+                : [];
+            if (serializedHistory.length) {
+                itemData.history = serializedHistory;
+            }
+            let lastModifiedIso = null;
+            if (metadata?.lastModified instanceof Date) {
+                lastModifiedIso = metadata.lastModified.toISOString();
+            } else if (typeof metadata?.lastModified === 'string' && metadata.lastModified.trim()) {
+                const parsed = new Date(metadata.lastModified);
+                if (!Number.isNaN(parsed.getTime())) {
+                    lastModifiedIso = parsed.toISOString();
+                }
+            }
+            if (!lastModifiedIso) {
+                lastModifiedIso = new Date().toISOString();
+                if (metadata) {
+                    metadata.lastModified = new Date(lastModifiedIso);
+                    itemMetadata.set(itemId, metadata);
+                }
+            }
+            itemData.lastModified = lastModifiedIso;
         } else {
             itemData.nameHidden = element.dataset.nameHidden === 'true';
         }
@@ -1191,16 +1271,34 @@ function normalizeWorkspaceLayoutEntry(entry) {
         locked: entry.locked === true || entry.locked === 'true',
     };
     if (type === 'item') {
+        const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : generateItemId();
         const color =
             typeof entry.color === 'string' && entry.color.trim()
                 ? entry.color.trim()
                 : '#3a7afe';
         normalized.color = color;
         normalized.comment = typeof entry.comment === 'string' ? entry.comment : '';
+        normalized.id = id;
         const attachmentsSource = Array.isArray(entry.attachments) ? entry.attachments : [];
         normalized.attachments = attachmentsSource
             .map((attachment) => normalizeAttachmentEntry(attachment))
             .filter((value) => value !== null);
+        const historySource = Array.isArray(entry.history) ? entry.history : [];
+        normalized.history = historySource
+            .map((record) => normalizeHistoryRecord(record))
+            .filter((value) => value !== null);
+        if (typeof entry.lastModified === 'string' && entry.lastModified.trim()) {
+            const parsed = new Date(entry.lastModified);
+            if (!Number.isNaN(parsed.getTime())) {
+                normalized.lastModified = parsed.toISOString();
+            }
+        }
+        if (!normalized.lastModified && normalized.history && normalized.history.length) {
+            normalized.lastModified = normalized.history[0].timestamp;
+        }
+        if (!normalized.lastModified) {
+            normalized.lastModified = new Date().toISOString();
+        }
     } else {
         normalized.nameHidden = entry.nameHidden === true || entry.nameHidden === 'true';
     }
@@ -1250,7 +1348,7 @@ function loadWorkspaceLayout(entries, { recordHistory = false } = {}) {
                     color: normalized.type === 'item' ? normalized.color : '#ffffff',
                     type: normalized.type,
                 },
-                { skipHistory: true }
+                { skipHistory: true, skipMetadata: true }
             );
             element.dataset.x = normalized.x.toString();
             element.dataset.y = normalized.y.toString();
@@ -1266,13 +1364,29 @@ function loadWorkspaceLayout(entries, { recordHistory = false } = {}) {
                 element.dataset.comment = normalized.comment || '';
                 element.dataset.locked = normalized.locked ? 'true' : 'false';
                 element.classList.toggle('locked', normalized.locked);
-                updateItemRecord(element, null, { updateComment: true, updateDeck: true });
-                const metadata = ensureItemMetadataRecord(element);
-                if (metadata) {
-                    metadata.attachments = Array.isArray(normalized.attachments)
+                element.dataset.itemId = normalized.id;
+                const parsedLastModified = new Date(normalized.lastModified);
+                const lastModifiedDate = Number.isNaN(parsedLastModified.getTime())
+                    ? new Date()
+                    : parsedLastModified;
+                const metadata = {
+                    id: normalized.id,
+                    element,
+                    label: getItemLabel(element),
+                    deck: determineDeckForItem(element),
+                    lastModified: lastModifiedDate,
+                    comment: (element.dataset.comment || '').trim(),
+                    attachments: Array.isArray(normalized.attachments)
                         ? normalized.attachments.map((attachment) => ({ ...attachment }))
-                        : [];
-                }
+                        : [],
+                };
+                itemMetadata.set(normalized.id, metadata);
+                const historyEvents = Array.isArray(normalized.history)
+                    ? normalized.history
+                          .map((record) => historyRecordToEvent(record))
+                          .filter((value) => value !== null)
+                    : [];
+                itemHistories.set(normalized.id, historyEvents.slice(0, 50));
                 updateAttachmentIndicator(element);
             } else {
                 element.dataset.label = normalized.label;

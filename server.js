@@ -39,6 +39,29 @@ function normalizeAttachment(input) {
   return { id, name, type, size, dataUrl, addedAt };
 }
 
+function normalizeHistoryEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+  const message = typeof entry.message === 'string' && entry.message.trim() ? entry.message.trim() : '';
+  if (!message) {
+    return null;
+  }
+  let timestamp = null;
+  if (entry.timestamp instanceof Date) {
+    timestamp = entry.timestamp.toISOString();
+  } else if (typeof entry.timestamp === 'string' && entry.timestamp.trim()) {
+    const parsed = new Date(entry.timestamp);
+    if (!Number.isNaN(parsed.getTime())) {
+      timestamp = parsed.toISOString();
+    }
+  }
+  if (!timestamp) {
+    timestamp = new Date().toISOString();
+  }
+  return { message, timestamp };
+}
+
 function normalizeLayoutEntry(entry) {
   if (!entry || typeof entry !== 'object') {
     return null;
@@ -52,12 +75,44 @@ function normalizeLayoutEntry(entry) {
   const rotation = Number.isFinite(Number(entry.rotation)) ? Number(entry.rotation) : 0;
   const locked = entry.locked === true || entry.locked === 'true';
   if (type === 'item') {
+    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : generateId('item');
     const color = typeof entry.color === 'string' && entry.color.trim() ? entry.color.trim() : '#3a7afe';
     const comment = typeof entry.comment === 'string' ? entry.comment : '';
     const attachments = Array.isArray(entry.attachments)
       ? entry.attachments.map((item) => normalizeAttachment(item)).filter(Boolean)
       : [];
-    return { type, label, width, height, x, y, rotation, locked, color, comment, attachments };
+    const history = Array.isArray(entry.history)
+      ? entry.history.map((record) => normalizeHistoryEntry(record)).filter(Boolean)
+      : [];
+    let lastModified = null;
+    if (typeof entry.lastModified === 'string' && entry.lastModified.trim()) {
+      const parsed = new Date(entry.lastModified);
+      if (!Number.isNaN(parsed.getTime())) {
+        lastModified = parsed.toISOString();
+      }
+    }
+    if (!lastModified && history.length) {
+      lastModified = history[0].timestamp;
+    }
+    if (!lastModified) {
+      lastModified = new Date().toISOString();
+    }
+    return {
+      type,
+      id,
+      label,
+      width,
+      height,
+      x,
+      y,
+      rotation,
+      locked,
+      color,
+      comment,
+      attachments,
+      history,
+      lastModified,
+    };
   }
   const nameHidden = entry.nameHidden === true || entry.nameHidden === 'true';
   return { type, label, width, height, x, y, rotation, locked, nameHidden };
