@@ -106,6 +106,7 @@ let workspaceSaveTimer = null;
 let isApplyingRemoteState = false;
 let isLoadingWorkspace = false;
 let socket = null;
+let pendingStateVersion = null;
 
 function getDeckAreaElements() {
     return Array.from(workspaceContent.querySelectorAll('.deck-area'));
@@ -1896,6 +1897,10 @@ async function syncStateWithServer() {
         return;
     }
     const payload = getSerializableState();
+    const expectedNextVersion = (lastKnownVersion || 0) + 1;
+    if (pendingStateVersion === null || expectedNextVersion > pendingStateVersion) {
+        pendingStateVersion = expectedNextVersion;
+    }
     try {
         const response = await fetch(API_STATE_ENDPOINT, {
             method: 'POST',
@@ -1906,9 +1911,15 @@ async function syncStateWithServer() {
             throw new Error(`Request failed with status ${response.status}`);
         }
         const result = await response.json();
+        const nextVersion = Number(result?.version);
+        if (Number.isFinite(nextVersion)) {
+            pendingStateVersion = nextVersion;
+        }
         applyStateFromServer(result, { replaceWorkspace: false, force: true });
+        pendingStateVersion = null;
     } catch (error) {
         console.error('Failed to sync decks with server', error);
+        pendingStateVersion = null;
     }
 }
 
@@ -2005,6 +2016,10 @@ function connectRealtime() {
         applyStateFromServer(payload, { replaceWorkspace: true, force: true });
     });
     socket.on('state:update', (payload) => {
+        const incomingVersion = Number(payload?.version);
+        if (pendingStateVersion !== null && Number.isFinite(incomingVersion) && incomingVersion === pendingStateVersion) {
+            return;
+        }
         applyStateFromServer(payload, { replaceWorkspace: true });
     });
 }
