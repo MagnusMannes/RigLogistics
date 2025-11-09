@@ -2191,7 +2191,11 @@ function createItemElement({ width, height, label, color, type = 'item' }, optio
     if (type === 'item') {
         element.style.background = color;
         element.textContent = label || 'New item';
-        updateAttachmentIndicator(element);
+        if (!skipMetadata) {
+            updateAttachmentIndicator(element);
+        } else {
+            element.dataset.hasAttachments = 'false';
+        }
     } else {
         element.style.background = '#ffffff';
         element.style.color = '#0f172a';
