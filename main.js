@@ -72,11 +72,17 @@ function setupToolsMenuPlacement() {
         return;
     }
 
-    const pointerCoarseQuery = window.matchMedia('(pointer: coarse)');
     const tabletWidthQuery = window.matchMedia('(min-width: 700px) and (max-width: 1100px)');
 
+    const isIpadDevice = () => {
+        const ua = navigator.userAgent || '';
+        const platform = navigator.platform || '';
+        const isModernIpad = platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+        return /iPad/i.test(ua) || isModernIpad;
+    };
+
     const updatePlacement = () => {
-        const shouldMoveToRightControls = pointerCoarseQuery.matches && tabletWidthQuery.matches;
+        const shouldMoveToRightControls = isIpadDevice() && tabletWidthQuery.matches;
 
         if (shouldMoveToRightControls) {
             if (toolsMenuContainer.parentElement !== toolsMenuMobileAnchor) {
@@ -103,7 +109,6 @@ function setupToolsMenuPlacement() {
         }
     };
 
-    registerMediaQuery(pointerCoarseQuery);
     registerMediaQuery(tabletWidthQuery);
     window.addEventListener('resize', updatePlacement);
     window.addEventListener('orientationchange', updatePlacement);
