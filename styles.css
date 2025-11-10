@@ -221,16 +221,17 @@ button.icon-button {
 .nav-controls {
     display: flex;
     flex-direction: row;
-    gap: 0.5rem;
+    gap: 0.4rem;
     align-items: center;
     flex-wrap: wrap;
     min-width: max-content;
 }
 
 .nav-controls button {
-    padding: 0.35rem 0.65rem;
-    font-size: 0.85rem;
-    gap: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.8rem;
+    gap: 0.25rem;
+    border-radius: 9px;
 }
 
 .toolbar {
