@@ -281,6 +281,17 @@ button.icon-button {
     flex: 1 1 220px;
 }
 
+@media (min-width: 1081px) {
+    .left-controls {
+        overflow: visible;
+    }
+
+    .toolbar-scroll .field--label {
+        flex: 1 1 clamp(180px, 33%, 320px);
+        max-width: clamp(180px, 33%, 320px);
+    }
+}
+
 .tools-menu {
     position: relative;
     display: flex;
