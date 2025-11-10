@@ -231,6 +231,8 @@ button.icon-button {
     gap: 0.65rem;
     flex-wrap: wrap;
     align-items: flex-end;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .tools-menu {
@@ -261,7 +263,17 @@ button.icon-button {
     border-radius: 10px;
     padding: 0.55rem 0.75rem;
     color: var(--panel-light-text);
-    min-width: 80px;
+    min-width: 0;
+}
+
+.toolbar input[type="number"] {
+    width: 5.5ch;
+    text-align: right;
+}
+
+.toolbar input[type="text"] {
+    flex: 1 1 180px;
+    min-width: 140px;
 }
 
 .toolbar input[type="color"] {
@@ -1363,6 +1375,75 @@ button.icon-button {
 .zoom-indicator {
     font-size: 0.9rem;
     color: var(--panel-light-muted);
+}
+
+@media (min-width: 768px) and (max-width: 1180px) and (pointer: coarse) {
+    .workspace-header {
+        position: relative;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .left-controls {
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .nav-controls {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 0;
+    }
+
+    .nav-controls button {
+        flex: 0 1 auto;
+        white-space: nowrap;
+    }
+
+    .toolbar {
+        flex: 1 1 auto;
+        align-items: center;
+        gap: 0.6rem;
+    }
+
+    .toolbar label {
+        flex: 0 0 auto;
+    }
+
+    .toolbar input[type="number"] {
+        width: 5ch;
+    }
+
+    .toolbar input[type="text"] {
+        flex: 1 1 160px;
+        min-width: 0;
+    }
+
+    #create-item,
+    .tools-menu {
+        flex: 0 0 auto;
+    }
+
+    .right-controls {
+        margin-left: auto;
+        align-items: flex-end;
+    }
+
+    .zoom-indicator {
+        position: absolute;
+        top: 0.65rem;
+        right: 1rem;
+        background: rgba(15, 23, 42, 0.78);
+        color: #fff;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        font-weight: 600;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.25);
+        pointer-events: none;
+    }
 }
 
 @media (max-width: 900px) {
