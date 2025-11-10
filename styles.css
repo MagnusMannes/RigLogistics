@@ -240,6 +240,13 @@ button.icon-button {
     padding-inline: 0.3rem;
 }
 
+@media (min-width: 700px) and (max-width: 1100px) {
+    .nav-controls {
+        flex-direction: row;
+        align-items: center;
+    }
+}
+
 .toolbar {
     display: flex;
     gap: 0.65rem;
@@ -257,6 +264,19 @@ button.icon-button {
 .tools-menu .menu {
     top: calc(100% + 0.4rem);
     right: 0;
+}
+
+.tools-menu-anchor {
+    display: none;
+    align-items: center;
+}
+
+.tools-menu-anchor.tools-menu-anchor--active {
+    display: flex;
+}
+
+.tools-menu--tablet {
+    margin-left: 0.75rem;
 }
 
 .toolbar label {
