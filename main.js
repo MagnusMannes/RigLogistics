@@ -9,6 +9,8 @@ const MIN_ITEM_SIZE_METERS = 0.5;
 const DEFAULT_ITEM_WIDTH_METERS = 5;
 const DEFAULT_ITEM_HEIGHT_METERS = 3;
 const DEFAULT_DECK_AREA_SIZE_METERS = Number((320 / PIXELS_PER_METER).toFixed(2));
+const LONG_PRESS_DURATION_MS = 550;
+const LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 
 const ITEM_SHAPE_LABELS = {
     rectangle: 'Rectangle',
@@ -1595,24 +1597,23 @@ const workspaceState = {
 function calculateCenteredPosition(widthMeters, heightMeters) {
     const widthPx = metersToPixels(widthMeters);
     const heightPx = metersToPixels(heightMeters);
-    const containerWidth = workspaceContainer
-        ? workspaceContainer.clientWidth || workspaceContainer.offsetWidth
-        : 0;
-    const containerHeight = workspaceContainer
-        ? workspaceContainer.clientHeight || workspaceContainer.offsetHeight
-        : 0;
-    if (
-        Number.isFinite(containerWidth) &&
-        Number.isFinite(containerHeight) &&
-        containerWidth > 0 &&
-        containerHeight > 0 &&
-        Number.isFinite(workspaceState.scale) &&
-        workspaceState.scale !== 0
-    ) {
-        const centerX = containerWidth / 2;
-        const centerY = containerHeight / 2;
-        const workspaceCenterX = (centerX - workspaceState.translateX) / workspaceState.scale;
-        const workspaceCenterY = (centerY - workspaceState.translateY) / workspaceState.scale;
+    const containerRect =
+        workspaceContainer && typeof workspaceContainer.getBoundingClientRect === 'function'
+            ? workspaceContainer.getBoundingClientRect()
+            : null;
+    const contentRect =
+        workspaceContent && typeof workspaceContent.getBoundingClientRect === 'function'
+            ? workspaceContent.getBoundingClientRect()
+            : null;
+    const scale = Number.isFinite(workspaceState.scale) && workspaceState.scale !== 0
+        ? workspaceState.scale
+        : BASE_SCALE;
+
+    if (containerRect && contentRect && Number.isFinite(scale) && scale !== 0) {
+        const centerX = containerRect.left + containerRect.width / 2;
+        const centerY = containerRect.top + containerRect.height / 2;
+        const workspaceCenterX = (centerX - contentRect.left) / scale;
+        const workspaceCenterY = (centerY - contentRect.top) / scale;
         if (Number.isFinite(workspaceCenterX) && Number.isFinite(workspaceCenterY)) {
             return {
                 x: workspaceCenterX - widthPx / 2,
@@ -1620,11 +1621,16 @@ function calculateCenteredPosition(widthMeters, heightMeters) {
             };
         }
     }
-    const computedStyle = getComputedStyle(workspaceContent);
+
+    const computedStyle = workspaceContent ? getComputedStyle(workspaceContent) : null;
     const contentWidth =
-        workspaceContent.offsetWidth || Number.parseFloat(computedStyle.width) || widthPx;
+        (workspaceContent && workspaceContent.offsetWidth) ||
+        (computedStyle ? Number.parseFloat(computedStyle.width) : widthPx) ||
+        widthPx;
     const contentHeight =
-        workspaceContent.offsetHeight || Number.parseFloat(computedStyle.height) || heightPx;
+        (workspaceContent && workspaceContent.offsetHeight) ||
+        (computedStyle ? Number.parseFloat(computedStyle.height) : heightPx) ||
+        heightPx;
     return {
         x: (contentWidth - widthPx) / 2,
         y: (contentHeight - heightPx) / 2,
@@ -2419,22 +2425,63 @@ function setupItemInteractions(element, resizeHandle) {
     let pointerId = null;
     let action = null;
     let start = {};
+    let longPressTimer = null;
+    let longPressTriggered = false;
+    let lastPointerPosition = { x: 0, y: 0 };
+
+    const clearLongPressTimer = () => {
+        if (longPressTimer !== null) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    };
+
+    const releasePointerCaptureSafely = () => {
+        if (pointerId === null) {
+            return;
+        }
+        try {
+            if (typeof element.hasPointerCapture === 'function') {
+                if (element.hasPointerCapture(pointerId)) {
+                    element.releasePointerCapture(pointerId);
+                }
+            } else {
+                element.releasePointerCapture(pointerId);
+            }
+        } catch (error) {
+            // Some browsers may throw if capture is no longer active; ignore.
+        }
+    };
+
+    const triggerLongPress = () => {
+        if (longPressTriggered) {
+            return;
+        }
+        longPressTriggered = true;
+        clearLongPressTimer();
+        releasePointerCaptureSafely();
+        action = null;
+        activeItem = element;
+        openContextMenu(lastPointerPosition.x, lastPointerPosition.y);
+    };
 
     element.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) {
+        const isTouchPointer = event.pointerType === 'touch';
+        if (event.button !== 0 && !isTouchPointer) {
             return;
         }
 
         const isDeckArea = element.dataset.type === 'deck-area';
         const isLockedDeck = isDeckArea && element.dataset.locked === 'true';
         const isLockedItem = !isDeckArea && element.dataset.locked === 'true';
+        const isLocked = isLockedDeck || isLockedItem;
 
         if (isDeckArea && !deckModifyMode) {
             return;
         }
 
-        if (isLockedDeck || isLockedItem) {
-            return;
+        if (isTouchPointer) {
+            event.preventDefault();
         }
 
         if (!isDeckArea && event.target === resizeHandle) {
@@ -2444,7 +2491,14 @@ function setupItemInteractions(element, resizeHandle) {
         } else {
             action = 'move';
         }
+        if (isLocked) {
+            action = null;
+        }
         pointerId = event.pointerId;
+        longPressTriggered = false;
+        clearLongPressTimer();
+        lastPointerPosition.x = event.clientX;
+        lastPointerPosition.y = event.clientY;
         element.setPointerCapture(pointerId);
         start = {
             x: event.clientX,
@@ -2465,10 +2519,25 @@ function setupItemInteractions(element, resizeHandle) {
         if (action === 'resize' && element.dataset.type === 'deck-area') {
             showDeckAreaResizeGuides(element);
         }
+
+        if (isTouchPointer) {
+            longPressTimer = window.setTimeout(triggerLongPress, LONG_PRESS_DURATION_MS);
+        }
     });
 
     element.addEventListener('pointermove', (event) => {
         if (pointerId !== event.pointerId) return;
+        lastPointerPosition.x = event.clientX;
+        lastPointerPosition.y = event.clientY;
+        if (!longPressTriggered && longPressTimer !== null) {
+            const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+            if (distance > LONG_PRESS_MOVE_THRESHOLD_PX) {
+                clearLongPressTimer();
+            }
+        }
+        if (longPressTriggered) {
+            return;
+        }
         const deltaX = (event.clientX - start.x) / workspaceState.scale;
         const deltaY = (event.clientY - start.y) / workspaceState.scale;
 
@@ -2498,32 +2567,37 @@ function setupItemInteractions(element, resizeHandle) {
 
     element.addEventListener('pointerup', (event) => {
         if (pointerId !== event.pointerId) return;
-        element.releasePointerCapture(pointerId);
-        const completedAction = action;
+        const wasDeckAreaResize = action === 'resize' && element.dataset.type === 'deck-area';
+        clearLongPressTimer();
+        releasePointerCaptureSafely();
+        const completedAction = longPressTriggered ? null : action;
         pointerId = null;
         action = null;
-        if (completedAction === 'resize' && element.dataset.type === 'deck-area') {
+        if (wasDeckAreaResize) {
             hideDeckAreaResizeGuides(element);
         }
         if (completedAction && element.dataset.type === 'item') {
             handleItemInteractionComplete(element, completedAction);
         }
+        longPressTriggered = false;
     });
 
     element.addEventListener('pointercancel', () => {
         const wasResize = action === 'resize';
-        if (pointerId !== null) {
-            element.releasePointerCapture(pointerId);
-        }
+        clearLongPressTimer();
+        releasePointerCaptureSafely();
         pointerId = null;
         action = null;
         if (wasResize && element.dataset.type === 'deck-area') {
             hideDeckAreaResizeGuides(element);
         }
+        longPressTriggered = false;
     });
 
     element.addEventListener('contextmenu', (event) => {
         event.preventDefault();
+        clearLongPressTimer();
+        longPressTriggered = false;
         activeItem = element;
         openContextMenu(event.clientX, event.clientY);
     });
@@ -3535,7 +3609,8 @@ function setupWorkspaceInteractions() {
     let panStart = { x: 0, y: 0, translateX: 0, translateY: 0 };
 
     workspaceContainer.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) {
+        const isTouchPointer = event.pointerType === 'touch';
+        if (event.button !== 0 && !isTouchPointer) {
             return;
         }
 
@@ -3545,8 +3620,15 @@ function setupWorkspaceInteractions() {
         if (!isWorkspaceSurface && !lockedElement) {
             return;
         }
+        if (isTouchPointer) {
+            event.preventDefault();
+        }
         isPanning = true;
-        workspaceContainer.setPointerCapture(event.pointerId);
+        try {
+            workspaceContainer.setPointerCapture(event.pointerId);
+        } catch (error) {
+            // Ignore if pointer capture is not supported or already active.
+        }
         panStart = {
             x: event.clientX,
             y: event.clientY,
@@ -3566,7 +3648,17 @@ function setupWorkspaceInteractions() {
 
     const stopPan = (event) => {
         if (!isPanning) return;
-        workspaceContainer.releasePointerCapture(event.pointerId);
+        try {
+            if (typeof workspaceContainer.hasPointerCapture === 'function') {
+                if (workspaceContainer.hasPointerCapture(event.pointerId)) {
+                    workspaceContainer.releasePointerCapture(event.pointerId);
+                }
+            } else {
+                workspaceContainer.releasePointerCapture(event.pointerId);
+            }
+        } catch (error) {
+            // Ignore if pointer capture was already released.
+        }
         isPanning = false;
     };
 
