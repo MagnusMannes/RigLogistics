@@ -208,7 +208,7 @@ button.icon-button {
 .left-controls {
     display: flex;
     gap: 1rem;
-    align-items: flex-start;
+    align-items: center;
     flex-wrap: wrap;
 }
 
@@ -220,9 +220,10 @@ button.icon-button {
 
 .nav-controls {
     display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    align-items: flex-start;
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
     min-width: max-content;
 }
 
@@ -277,13 +278,21 @@ button.icon-button {
 }
 
 .toolbar input[type="number"] {
-    width: 5.5ch;
+    width: 11ch;
     text-align: right;
 }
 
 .toolbar input[type="text"] {
     flex: 1 1 180px;
     min-width: 140px;
+}
+
+#input-label {
+    height: 38px;
+    max-height: 38px;
+    line-height: 1.2;
+    padding: 0 0.75rem;
+    resize: none;
 }
 
 .toolbar input[type="color"] {
