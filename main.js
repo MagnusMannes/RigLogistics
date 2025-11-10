@@ -43,6 +43,8 @@ const deckModifyToggleBtn = document.getElementById('deck-modify-toggle');
 const deckDownloadButton = document.getElementById('deck-download-button');
 const deckUploadButton = document.getElementById('deck-upload-button');
 const deckAddAreaButton = document.getElementById('deck-add-area-button');
+const toolsMenuContainer = document.getElementById('tools-menu-container');
+const toolsMenuMobileAnchor = document.getElementById('tools-menu-mobile-anchor');
 const toolsButton = document.getElementById('tools-button');
 const toolsMenu = document.getElementById('tools-menu');
 const measureToggleBtn = document.getElementById('toggle-measure-mode');
@@ -53,6 +55,7 @@ const planningSidebar = document.getElementById('planning-sidebar');
 const planningCurrentDeckToggle = document.getElementById('planning-current-deck');
 const planningJobsList = document.getElementById('planning-job-list');
 const workspaceHeader = document.querySelector('.workspace-header');
+const toolbar = document.querySelector('.toolbar');
 const contextMenu = document.getElementById('context-menu');
 const zoomValueEl = document.getElementById('zoom-value');
 const measurementInstructions = document.getElementById('measurement-instructions');
@@ -60,6 +63,51 @@ const deckModifyNotice = document.getElementById('deck-modify-notice');
 
 if (deckModifyNotice) {
     deckModifyNotice.setAttribute('aria-hidden', 'true');
+}
+
+setupToolsMenuPlacement();
+
+function setupToolsMenuPlacement() {
+    if (!toolsMenuContainer || !toolsMenuMobileAnchor || !toolbar) {
+        return;
+    }
+
+    const pointerCoarseQuery = window.matchMedia('(pointer: coarse)');
+    const tabletWidthQuery = window.matchMedia('(min-width: 700px) and (max-width: 1100px)');
+
+    const updatePlacement = () => {
+        const shouldMoveToRightControls = pointerCoarseQuery.matches && tabletWidthQuery.matches;
+
+        if (shouldMoveToRightControls) {
+            if (toolsMenuContainer.parentElement !== toolsMenuMobileAnchor) {
+                toolsMenuMobileAnchor.appendChild(toolsMenuContainer);
+                toolsMenuMobileAnchor.classList.add('tools-menu-anchor--active');
+                toolsMenuContainer.classList.add('tools-menu--tablet');
+            }
+            return;
+        }
+
+        toolsMenuContainer.classList.remove('tools-menu--tablet');
+        toolsMenuMobileAnchor.classList.remove('tools-menu-anchor--active');
+
+        if (toolsMenuContainer.parentElement !== toolbar) {
+            toolbar.appendChild(toolsMenuContainer);
+        }
+    };
+
+    const registerMediaQuery = (mediaQuery) => {
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', updatePlacement);
+        } else if (typeof mediaQuery.addListener === 'function') {
+            mediaQuery.addListener(updatePlacement);
+        }
+    };
+
+    registerMediaQuery(pointerCoarseQuery);
+    registerMediaQuery(tabletWidthQuery);
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('orientationchange', updatePlacement);
+    updatePlacement();
 }
 
 const inputWidth = document.getElementById('input-width');
