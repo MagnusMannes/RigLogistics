@@ -227,6 +227,12 @@ button.icon-button {
     min-width: max-content;
 }
 
+.nav-controls button {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.85rem;
+    gap: 0.35rem;
+}
+
 .toolbar {
     display: flex;
     gap: 0.65rem;
@@ -1413,9 +1419,9 @@ button.icon-button {
     .nav-controls {
         flex-direction: row;
         align-items: center;
-        gap: 0.6rem;
+        gap: 0.45rem;
         min-width: 0;
-        flex: 0 0 auto;
+        flex: 0 1 auto;
     }
 
     .nav-controls button {
@@ -1427,10 +1433,11 @@ button.icon-button {
         flex: 1 1 auto;
         align-items: center;
         gap: 0.6rem;
+        min-width: 0;
     }
 
     .toolbar label {
-        flex: 0 0 auto;
+        flex: 0 1 auto;
     }
 
     .toolbar input[type="number"] {
