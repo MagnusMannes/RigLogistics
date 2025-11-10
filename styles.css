@@ -220,9 +220,9 @@ button.icon-button {
 
 .nav-controls {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     gap: 0.4rem;
-    align-items: center;
+    align-items: flex-start;
     flex-wrap: wrap;
     min-width: max-content;
 }
@@ -1431,8 +1431,8 @@ button.icon-button {
     }
 
     .nav-controls {
-        flex-direction: row;
-        align-items: center;
+        flex-direction: column;
+        align-items: flex-start;
         gap: 0.45rem;
         min-width: 0;
         flex: 0 1 auto;
