@@ -3605,8 +3605,95 @@ function handleUploadDecks() {
 }
 
 function setupWorkspaceInteractions() {
+    if (!workspaceContainer) {
+        return;
+    }
     let isPanning = false;
     let panStart = { x: 0, y: 0, translateX: 0, translateY: 0 };
+    const activeTouchPointers = new Map();
+    let pinchState = null;
+
+    const clampScale = (value) => Math.min(2.5, Math.max(MIN_SCALE, value));
+
+    const beginPan = (event) => {
+        isPanning = true;
+        panStart = {
+            x: event.clientX,
+            y: event.clientY,
+            translateX: workspaceState.translateX,
+            translateY: workspaceState.translateY,
+        };
+        if (event.pointerType !== 'touch') {
+            try {
+                workspaceContainer.setPointerCapture(event.pointerId);
+            } catch (error) {
+                // Ignore if pointer capture is not supported or already active.
+            }
+        }
+    };
+
+    const initializePinchState = () => {
+        if (activeTouchPointers.size < 2) {
+            return null;
+        }
+        const touches = Array.from(activeTouchPointers.values()).slice(0, 2);
+        const [first, second] = touches;
+        const distance = Math.hypot(second.x - first.x, second.y - first.y);
+        if (!Number.isFinite(distance) || distance === 0) {
+            return null;
+        }
+        const rect = workspaceContainer.getBoundingClientRect();
+        const centerClientX = (first.x + second.x) / 2;
+        const centerClientY = (first.y + second.y) / 2;
+        return {
+            distance,
+            centerX: centerClientX - rect.left,
+            centerY: centerClientY - rect.top,
+            scale: workspaceState.scale,
+            translateX: workspaceState.translateX,
+            translateY: workspaceState.translateY,
+        };
+    };
+
+    const applyPinchTransform = () => {
+        if (!pinchState || activeTouchPointers.size < 2) {
+            return;
+        }
+        const touches = Array.from(activeTouchPointers.values()).slice(0, 2);
+        const [first, second] = touches;
+        const currentDistance = Math.hypot(second.x - first.x, second.y - first.y);
+        if (!Number.isFinite(currentDistance) || currentDistance === 0) {
+            return;
+        }
+        const rect = workspaceContainer.getBoundingClientRect();
+        const centerClientX = (first.x + second.x) / 2;
+        const centerClientY = (first.y + second.y) / 2;
+        const centerX = centerClientX - rect.left;
+        const centerY = centerClientY - rect.top;
+
+        const previousScale = pinchState.scale;
+        const scaleMultiplier = currentDistance / pinchState.distance;
+        const nextScale = clampScale(previousScale * scaleMultiplier);
+        if (!Number.isFinite(previousScale) || previousScale === 0) {
+            return;
+        }
+        const workspaceCenterX = (pinchState.centerX - pinchState.translateX) / previousScale;
+        const workspaceCenterY = (pinchState.centerY - pinchState.translateY) / previousScale;
+
+        workspaceState.scale = nextScale;
+        workspaceState.translateX = centerX - workspaceCenterX * nextScale;
+        workspaceState.translateY = centerY - workspaceCenterY * nextScale;
+        applyWorkspaceTransform();
+
+        pinchState = {
+            distance: currentDistance,
+            centerX,
+            centerY,
+            scale: workspaceState.scale,
+            translateX: workspaceState.translateX,
+            translateY: workspaceState.translateY,
+        };
+    };
 
     workspaceContainer.addEventListener('pointerdown', (event) => {
         const isTouchPointer = event.pointerType === 'touch';
@@ -3622,25 +3709,32 @@ function setupWorkspaceInteractions() {
         }
         if (isTouchPointer) {
             event.preventDefault();
+            activeTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            if (activeTouchPointers.size >= 2) {
+                pinchState = initializePinchState();
+                isPanning = false;
+                return;
+            }
+            beginPan(event);
+            return;
         }
-        isPanning = true;
-        try {
-            workspaceContainer.setPointerCapture(event.pointerId);
-        } catch (error) {
-            // Ignore if pointer capture is not supported or already active.
-        }
-        panStart = {
-            x: event.clientX,
-            y: event.clientY,
-            translateX: workspaceState.translateX,
-            translateY: workspaceState.translateY,
-        };
+        beginPan(event);
     });
 
     workspaceContainer.addEventListener('pointermove', (event) => {
-        if (!isPanning) return;
-        const deltaX = (event.clientX - panStart.x);
-        const deltaY = (event.clientY - panStart.y);
+        if (event.pointerType === 'touch' && activeTouchPointers.has(event.pointerId)) {
+            activeTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            if (pinchState && activeTouchPointers.size >= 2) {
+                event.preventDefault();
+                applyPinchTransform();
+                return;
+            }
+        }
+        if (!isPanning) {
+            return;
+        }
+        const deltaX = event.clientX - panStart.x;
+        const deltaY = event.clientY - panStart.y;
         workspaceState.translateX = panStart.translateX + deltaX;
         workspaceState.translateY = panStart.translateY + deltaY;
         applyWorkspaceTransform();
@@ -3662,13 +3756,28 @@ function setupWorkspaceInteractions() {
         isPanning = false;
     };
 
-    workspaceContainer.addEventListener('pointerup', stopPan);
-    workspaceContainer.addEventListener('pointercancel', stopPan);
+    const clearTouchPointer = (event) => {
+        if (activeTouchPointers.has(event.pointerId)) {
+            activeTouchPointers.delete(event.pointerId);
+        }
+        if (activeTouchPointers.size < 2) {
+            pinchState = null;
+        }
+    };
+
+    workspaceContainer.addEventListener('pointerup', (event) => {
+        clearTouchPointer(event);
+        stopPan(event);
+    });
+    workspaceContainer.addEventListener('pointercancel', (event) => {
+        clearTouchPointer(event);
+        stopPan(event);
+    });
 
     workspaceContainer.addEventListener('wheel', (event) => {
         event.preventDefault();
         const scaleDelta = event.deltaY < 0 ? 1.1 : 0.9;
-        const newScale = Math.min(2.5, Math.max(MIN_SCALE, workspaceState.scale * scaleDelta));
+        const newScale = clampScale(workspaceState.scale * scaleDelta);
 
         const rect = workspaceContainer.getBoundingClientRect();
         const cursorX = event.clientX - rect.left;
