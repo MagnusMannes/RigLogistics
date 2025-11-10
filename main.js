@@ -3275,34 +3275,9 @@ function handleCreateItem() {
     inputLabel.value = '';
 }
 
-function setSidebarVisibility(visible) {
-    if (!historySidebar) {
-        return;
-    }
-
-    historySidebar.classList.toggle('hidden', !visible);
-
-    if (toggleSidebarBtn) {
-        toggleSidebarBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
-        toggleSidebarBtn.textContent = visible ? 'Hide list' : 'Show list';
-    }
+function toggleSidebar() {
+    historySidebar.classList.toggle('hidden');
 }
-
-function toggleSidebar(forceVisible) {
-    if (!historySidebar) {
-        return;
-    }
-
-    const isCurrentlyVisible = !historySidebar.classList.contains('hidden');
-    const shouldBeVisible =
-        typeof forceVisible === 'boolean' ? forceVisible : !isCurrentlyVisible;
-
-    setSidebarVisibility(shouldBeVisible);
-}
-
-const initialSidebarVisible =
-    historySidebar && !historySidebar.classList.contains('hidden');
-setSidebarVisibility(Boolean(initialSidebarVisible));
 
 function toggleToolsMenu() {
     if (!toolsMenu) {
