@@ -1451,9 +1451,9 @@ button.icon-button {
     }
 
     .nav-controls {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.45rem;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
         min-width: 0;
         flex: 0 1 auto;
     }
@@ -1490,20 +1490,23 @@ button.icon-button {
 
     .right-controls {
         margin-left: auto;
-        align-items: flex-end;
+        align-items: center;
     }
 
     .zoom-indicator {
-        position: absolute;
-        top: 0.65rem;
-        right: 1rem;
-        background: rgba(15, 23, 42, 0.78);
-        color: #fff;
-        padding: 0.35rem 0.75rem;
-        border-radius: 999px;
+        position: static;
+        background: transparent;
+        color: var(--panel-light-muted);
+        padding: 0;
+        border-radius: 0;
         font-weight: 600;
-        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.25);
-        pointer-events: none;
+        box-shadow: none;
+    }
+
+    .tools-menu-anchor.tools-menu-anchor--active {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
     }
 }
 
