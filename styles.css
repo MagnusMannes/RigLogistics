@@ -751,6 +751,8 @@ button.icon-button {
     border-radius: 40px;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
     touch-action: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .planning-overlays {
@@ -871,6 +873,8 @@ button.icon-button {
     user-select: none;
     transition: box-shadow 0.2s ease;
     touch-action: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .item {
