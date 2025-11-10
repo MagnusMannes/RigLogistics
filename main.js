@@ -10,6 +10,14 @@ const DEFAULT_ITEM_WIDTH_METERS = 5;
 const DEFAULT_ITEM_HEIGHT_METERS = 3;
 const DEFAULT_DECK_AREA_SIZE_METERS = Number((320 / PIXELS_PER_METER).toFixed(2));
 
+const ITEM_SHAPE_LABELS = {
+    rectangle: 'Rectangle',
+    circle: 'Circle',
+    'triangle-right': 'Right triangle',
+    'triangle-equilateral': 'Equilateral triangle',
+};
+const ITEM_SHAPE_KEYS = Object.keys(ITEM_SHAPE_LABELS);
+
 const deckSelectionView = document.getElementById('deck-selection');
 const workspaceView = document.getElementById('workspace-view');
 const deckListEl = document.getElementById('deck-list');
@@ -108,6 +116,102 @@ let isLoadingWorkspace = false;
 let socket = null;
 let pendingStateVersion = null;
 
+function normalizeItemShape(shape) {
+    if (typeof shape !== 'string') {
+        return 'rectangle';
+    }
+    const normalized = shape.trim().toLowerCase();
+    return ITEM_SHAPE_KEYS.includes(normalized) ? normalized : 'rectangle';
+}
+
+function getItemShapeLabel(shape) {
+    const normalized = normalizeItemShape(shape);
+    return ITEM_SHAPE_LABELS[normalized] || ITEM_SHAPE_LABELS.rectangle;
+}
+
+function getItemShape(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return 'rectangle';
+    }
+    return normalizeItemShape(element.dataset.shape);
+}
+
+function applyItemShapeStyles(element, shape) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const normalized = normalizeItemShape(shape);
+    element.dataset.shape = normalized;
+}
+
+function isItemOnDeckLayer(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return false;
+    }
+    return element.dataset.deckLayer === 'true';
+}
+
+function applyItemDeckLayerStyles(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const deckLayer = isItemOnDeckLayer(element);
+    element.classList.toggle('deck-layer-item', deckLayer);
+    element.style.zIndex = deckLayer ? '0' : '';
+}
+
+function setItemShape(element, shape, { recordHistory = true } = {}) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const normalized = normalizeItemShape(shape);
+    const currentShape = getItemShape(element);
+    if (currentShape === normalized) {
+        return;
+    }
+    applyItemShapeStyles(element, normalized);
+    if (isPlanningItem(element)) {
+        if (recordHistory) {
+            persistCurrentPlanningJob();
+        }
+        return;
+    }
+    if (!recordHistory) {
+        return;
+    }
+    const message = `Item shape set to ${getItemShapeLabel(normalized)}${getItemHistoryLabel(element)}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false, updateDeck: false });
+}
+
+function setItemDeckLayerState(element, deckLayer, { recordHistory = true } = {}) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const shouldEnable = deckLayer === true || deckLayer === 'true';
+    const currentlyEnabled = isItemOnDeckLayer(element);
+    if (currentlyEnabled === shouldEnable) {
+        return;
+    }
+    element.dataset.deckLayer = shouldEnable ? 'true' : 'false';
+    applyItemDeckLayerStyles(element);
+    if (isPlanningItem(element)) {
+        if (recordHistory) {
+            persistCurrentPlanningJob();
+        }
+        return;
+    }
+    if (!recordHistory) {
+        return;
+    }
+    const labelSuffix = getItemHistoryLabel(element);
+    const message = shouldEnable
+        ? `Item moved to deck surface${labelSuffix}`
+        : `Item restored to default layer${labelSuffix}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false, updateDeck: false });
+}
+
 function getDeckAreaElements() {
     return Array.from(workspaceContent.querySelectorAll('.deck-area'));
 }
@@ -180,8 +284,15 @@ function loadPlanningJobForEditing(job) {
                     label: entry.label,
                     color: entry.color,
                     type: 'item',
+                    shape: entry.shape,
+                    deckLayer: entry.deckLayer,
                 },
-                { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
+                {
+                    skipHistory: true,
+                    skipMetadata: true,
+                    container: planningEditingLayer,
+                    autoPosition: false,
+                }
             );
             element.dataset.planningJobId = job.id;
             element.dataset.x = entry.x.toString();
@@ -226,6 +337,8 @@ function serializePlanningEditingItems() {
                 getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe'
             ),
             comment: (element.dataset.comment || '').trim(),
+            shape: getItemShape(element),
+            deckLayer: isItemOnDeckLayer(element),
         };
     });
 }
@@ -597,6 +710,8 @@ function normalizePlanningItem(item) {
     };
     normalized.color =
         typeof item.color === 'string' && item.color.trim() ? item.color : '#3a7afe';
+    normalized.shape = normalizeItemShape(item.shape);
+    normalized.deckLayer = item.deckLayer === true || item.deckLayer === 'true';
     return normalized;
 }
 
@@ -643,6 +758,8 @@ function planningItemToSerializable(item) {
     };
     if (item.type === 'item') {
         result.color = item.color ?? '#3a7afe';
+        result.shape = normalizeItemShape(item.shape);
+        result.deckLayer = item.deckLayer === true || item.deckLayer === 'true';
     } else if (item.type === 'deck-area') {
         result.nameHidden = Boolean(item.nameHidden);
     }
@@ -725,6 +842,8 @@ function layoutEntryToSerializable(entry) {
         base.color =
             typeof entry.color === 'string' && entry.color.trim() ? entry.color : '#3a7afe';
         base.comment = typeof entry.comment === 'string' ? entry.comment : '';
+        base.shape = normalizeItemShape(entry.shape);
+        base.deckLayer = entry.deckLayer === true || entry.deckLayer === 'true';
         if (typeof entry.id === 'string' && entry.id.trim()) {
             base.id = entry.id.trim();
         }
@@ -942,6 +1061,7 @@ function renderPlanningJobOverlay(job) {
             element.style.background = color;
             element.classList.toggle('has-dark-text', isColorDark(color));
             element.textContent = item.label || 'Item';
+            element.dataset.shape = normalizeItemShape(item.shape);
         } else {
             const label = document.createElement('div');
             label.className = 'overlay-label';
@@ -1179,6 +1299,8 @@ function serializeWorkspaceElements() {
             );
             itemData.color = color;
             itemData.comment = (element.dataset.comment || '').trim();
+            itemData.shape = getItemShape(element);
+            itemData.deckLayer = isItemOnDeckLayer(element);
             const itemId = element.dataset.itemId;
             if (itemId) {
                 itemData.id = itemId;
@@ -1278,6 +1400,8 @@ function normalizeWorkspaceLayoutEntry(entry) {
                 ? entry.color.trim()
                 : '#3a7afe';
         normalized.color = color;
+        normalized.shape = normalizeItemShape(entry.shape);
+        normalized.deckLayer = entry.deckLayer === true || entry.deckLayer === 'true';
         normalized.comment = typeof entry.comment === 'string' ? entry.comment : '';
         normalized.id = id;
         const attachmentsSource = Array.isArray(entry.attachments) ? entry.attachments : [];
@@ -1348,8 +1472,10 @@ function loadWorkspaceLayout(entries, { recordHistory = false } = {}) {
                     label: normalized.label,
                     color: normalized.type === 'item' ? normalized.color : '#ffffff',
                     type: normalized.type,
+                    shape: normalized.shape,
+                    deckLayer: normalized.deckLayer,
                 },
-                { skipHistory: true, skipMetadata: true }
+                { skipHistory: true, skipMetadata: true, autoPosition: false }
             );
             element.dataset.x = normalized.x.toString();
             element.dataset.y = normalized.y.toString();
@@ -1465,6 +1591,45 @@ const workspaceState = {
     translateX: -workspaceContent.offsetWidth / 2,
     translateY: -workspaceContent.offsetHeight / 2,
 };
+
+function calculateCenteredPosition(widthMeters, heightMeters) {
+    const widthPx = metersToPixels(widthMeters);
+    const heightPx = metersToPixels(heightMeters);
+    const containerWidth = workspaceContainer
+        ? workspaceContainer.clientWidth || workspaceContainer.offsetWidth
+        : 0;
+    const containerHeight = workspaceContainer
+        ? workspaceContainer.clientHeight || workspaceContainer.offsetHeight
+        : 0;
+    if (
+        Number.isFinite(containerWidth) &&
+        Number.isFinite(containerHeight) &&
+        containerWidth > 0 &&
+        containerHeight > 0 &&
+        Number.isFinite(workspaceState.scale) &&
+        workspaceState.scale !== 0
+    ) {
+        const centerX = containerWidth / 2;
+        const centerY = containerHeight / 2;
+        const workspaceCenterX = (centerX - workspaceState.translateX) / workspaceState.scale;
+        const workspaceCenterY = (centerY - workspaceState.translateY) / workspaceState.scale;
+        if (Number.isFinite(workspaceCenterX) && Number.isFinite(workspaceCenterY)) {
+            return {
+                x: workspaceCenterX - widthPx / 2,
+                y: workspaceCenterY - heightPx / 2,
+            };
+        }
+    }
+    const computedStyle = getComputedStyle(workspaceContent);
+    const contentWidth =
+        workspaceContent.offsetWidth || Number.parseFloat(computedStyle.width) || widthPx;
+    const contentHeight =
+        workspaceContent.offsetHeight || Number.parseFloat(computedStyle.height) || heightPx;
+    return {
+        x: (contentWidth - widthPx) / 2,
+        y: (contentHeight - heightPx) / 2,
+    };
+}
 
 function generateItemId() {
     itemIdCounter += 1;
@@ -2174,13 +2339,19 @@ function hideDeckAreaResizeGuides(element) {
     element.classList.remove('show-resize-guides');
 }
 
-function createItemElement({ width, height, label, color, type = 'item' }, options = {}) {
-    const { skipHistory = false, skipMetadata = false, container = workspaceContent } = options;
+function createItemElement(
+    { width, height, label, color, type = 'item', shape = 'rectangle', deckLayer = false },
+    options = {}
+) {
+    const {
+        skipHistory = false,
+        skipMetadata = false,
+        container = workspaceContent,
+        autoPosition = true,
+    } = options;
     const element = document.createElement('div');
     element.className = type;
     element.dataset.type = type;
-    element.dataset.x = '0';
-    element.dataset.y = '0';
     element.dataset.rotation = '0';
     element.dataset.width = width.toString();
     element.dataset.height = height.toString();
@@ -2188,9 +2359,17 @@ function createItemElement({ width, height, label, color, type = 'item' }, optio
     element.dataset.comment = '';
     element.style.width = `${metersToPixels(width)}px`;
     element.style.height = `${metersToPixels(height)}px`;
+    const centeredPosition = autoPosition ? calculateCenteredPosition(width, height) : null;
+    const initialX = centeredPosition && Number.isFinite(centeredPosition.x) ? centeredPosition.x : 0;
+    const initialY = centeredPosition && Number.isFinite(centeredPosition.y) ? centeredPosition.y : 0;
+    element.dataset.x = initialX.toFixed(2);
+    element.dataset.y = initialY.toFixed(2);
     if (type === 'item') {
         element.style.background = color;
         element.textContent = label || 'New item';
+        applyItemShapeStyles(element, shape);
+        element.dataset.deckLayer = deckLayer ? 'true' : 'false';
+        applyItemDeckLayerStyles(element);
         if (!skipMetadata) {
             updateAttachmentIndicator(element);
         } else {
@@ -2495,9 +2674,25 @@ function duplicateItem(element) {
     const label = getItemLabel(element);
     const color = rgbToHex(getComputedStyle(element).backgroundColor || element.style.background || '#3a7afe');
     const duplicateOptions = planningItem
-        ? { skipHistory: true, skipMetadata: true, container: planningEditingLayer }
-        : {};
-    const duplicate = createItemElement({ width, height, label, color, type: 'item' }, duplicateOptions);
+        ? {
+              skipHistory: true,
+              skipMetadata: true,
+              container: planningEditingLayer,
+              autoPosition: false,
+          }
+        : { autoPosition: false };
+    const duplicate = createItemElement(
+        {
+            width,
+            height,
+            label,
+            color,
+            type: 'item',
+            shape: getItemShape(element),
+            deckLayer: isItemOnDeckLayer(element),
+        },
+        duplicateOptions
+    );
     const offset = 40;
     const baseX = parseFloat(element.dataset.x) || 0;
     const baseY = parseFloat(element.dataset.y) || 0;
@@ -2703,6 +2898,69 @@ function openItemModifyDialog(element) {
     colorInput.setAttribute('aria-label', 'Item color');
     colorFieldset.appendChild(colorInput);
 
+    const shapeFieldset = document.createElement('fieldset');
+    const shapeLegend = document.createElement('legend');
+    shapeLegend.textContent = 'Shape';
+    shapeFieldset.appendChild(shapeLegend);
+    const shapeButtonGroup = document.createElement('div');
+    shapeButtonGroup.className = 'shape-button-group';
+    const shapeOptions = [
+        { value: 'rectangle', label: 'Rectangle' },
+        { value: 'circle', label: 'Circle' },
+        { value: 'triangle-right', label: 'Right triangle' },
+        { value: 'triangle-equilateral', label: 'Equilateral triangle' },
+    ];
+    const shapeButtons = [];
+    const updateShapeButtons = () => {
+        const currentShape = getItemShape(element);
+        shapeButtons.forEach((button) => {
+            const isActive = button.dataset.shapeValue === currentShape;
+            button.classList.toggle('active', isActive);
+            button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+    };
+    shapeOptions.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ghost shape-option-button';
+        button.dataset.shapeValue = option.value;
+        button.textContent = option.label;
+        button.addEventListener('click', () => {
+            if (locked) {
+                return;
+            }
+            setItemShape(element, option.value);
+            updateShapeButtons();
+        });
+        button.setAttribute('aria-pressed', 'false');
+        shapeButtons.push(button);
+        shapeButtonGroup.appendChild(button);
+    });
+    shapeFieldset.appendChild(shapeButtonGroup);
+
+    const layerFieldset = document.createElement('fieldset');
+    const layerLegend = document.createElement('legend');
+    layerLegend.textContent = 'Layering';
+    layerFieldset.appendChild(layerLegend);
+    const deckLayerButton = document.createElement('button');
+    deckLayerButton.type = 'button';
+    deckLayerButton.className = 'ghost deck-layer-button';
+    const updateDeckLayerButton = () => {
+        const deckLayerEnabled = isItemOnDeckLayer(element);
+        deckLayerButton.textContent = deckLayerEnabled
+            ? 'Restore default layer'
+            : 'Place under other items';
+        deckLayerButton.setAttribute('aria-pressed', deckLayerEnabled ? 'true' : 'false');
+    };
+    deckLayerButton.addEventListener('click', () => {
+        if (locked) {
+            return;
+        }
+        setItemDeckLayerState(element, !isItemOnDeckLayer(element));
+        updateDeckLayerButton();
+    });
+    layerFieldset.appendChild(deckLayerButton);
+
     const actions = document.createElement('div');
     actions.className = 'modify-actions';
     const cancelButton = document.createElement('button');
@@ -2750,7 +3008,7 @@ function openItemModifyDialog(element) {
     attachmentsList.className = 'attachment-list';
     attachmentSection.appendChild(attachmentsList);
 
-    form.append(sizeFieldset, labelFieldset, colorFieldset, attachmentSection);
+    form.append(sizeFieldset, labelFieldset, colorFieldset, shapeFieldset, layerFieldset, attachmentSection);
     actions.append(cancelButton);
     if (!locked) {
         actions.append(duplicateButton, saveButton);
@@ -2765,12 +3023,21 @@ function openItemModifyDialog(element) {
     renderModifyDialogAttachments();
     document.addEventListener('keydown', handleModifyDialogKeydown);
 
+    updateShapeButtons();
+    updateDeckLayerButton();
+
     if (locked) {
         widthInput.disabled = true;
         heightInput.disabled = true;
         labelInput.disabled = true;
         colorInput.disabled = true;
         duplicateButton.disabled = true;
+        shapeButtons.forEach((button) => {
+            button.disabled = true;
+            button.setAttribute('aria-disabled', 'true');
+        });
+        deckLayerButton.disabled = true;
+        deckLayerButton.setAttribute('aria-disabled', 'true');
     }
 
     form.addEventListener('submit', (event) => {
