@@ -604,7 +604,14 @@ button.icon-button {
 }
 
 .nav-controls button {
-    width: 100%;
+    width: auto;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 600px) {
+    .nav-controls button {
+        width: 100%;
+    }
 }
 
 .workspace-container {
