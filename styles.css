@@ -665,10 +665,25 @@ button.icon-button {
     background: rgba(59, 130, 246, 0.28);
     border-color: rgba(59, 130, 246, 0.55);
     color: #0f172a;
+    clip-path: none;
 }
 
 .planning-overlay-item.item.has-dark-text {
     color: #fff;
+}
+
+.planning-overlay-item.item[data-shape='circle'] {
+    border-radius: 50%;
+}
+
+.planning-overlay-item.item[data-shape='triangle-right'] {
+    border-radius: 0;
+    clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
+.planning-overlay-item.item[data-shape='triangle-equilateral'] {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
 }
 
 .planning-overlay-item.deck-area {
@@ -710,11 +725,31 @@ button.icon-button {
     border-radius: 0;
     box-shadow: 0 12px 30px rgba(15, 23, 42, 0.4);
     z-index: 1;
+    clip-path: none;
 }
 
 .item:active {
     cursor: grabbing;
     box-shadow: 0 20px 45px rgba(15, 23, 42, 0.55);
+}
+
+.item.deck-layer-item {
+    z-index: 0;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+}
+
+.item[data-shape='circle'] {
+    border-radius: 50%;
+}
+
+.item[data-shape='triangle-right'] {
+    border-radius: 0;
+    clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
+.item[data-shape='triangle-equilateral'] {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
 }
 
 .deck-area {
@@ -1224,6 +1259,29 @@ button.icon-button {
     padding: 0.2rem;
     height: 42px;
     width: 72px;
+}
+
+.shape-button-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.shape-option-button {
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.shape-option-button.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 10px 24px rgba(58, 122, 254, 0.25);
+}
+
+.deck-layer-button {
+    align-self: flex-start;
 }
 
 .modify-actions {
