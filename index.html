@@ -56,31 +56,33 @@
                     <div class="deck-modify-escape">click Escape button to leave modify mode</div>
                 </div>
                 <div class="left-controls">
-                    <div class="nav-controls">
-                        <button id="back-button" class="ghost">
-                            <span aria-hidden="true">←</span>
-                            <span class="label">Decks</span>
-                        </button>
-                        <button id="toggle-sidebar" class="ghost">Toggle list</button>
-                    </div>
                     <div class="toolbar">
-                        <label>
-                            W (m)
-                            <input type="number" id="input-width" min="0.5" step="0.1" value="5" />
-                        </label>
-                        <label>
-                            H (m)
-                            <input type="number" id="input-height" min="0.5" step="0.1" value="3" />
-                        </label>
-                        <label>
-                            Label
-                            <input type="text" id="input-label" placeholder="Item label" />
-                        </label>
-                        <label class="color-picker">
-                            Color
-                            <input type="color" id="input-color" value="#3a7afe" />
-                        </label>
-                        <button id="create-item" class="primary">Create item</button>
+                        <div class="toolbar-nav">
+                            <button id="back-button" class="ghost">
+                                <span aria-hidden="true">←</span>
+                                <span class="label">Decks</span>
+                            </button>
+                            <button id="toggle-sidebar" class="ghost" aria-pressed="false">Show list</button>
+                        </div>
+                        <div class="toolbar-scroll">
+                            <label class="field field--width">
+                                W (m)
+                                <input type="number" id="input-width" min="0.5" step="0.1" value="5" />
+                            </label>
+                            <label class="field field--height">
+                                H (m)
+                                <input type="number" id="input-height" min="0.5" step="0.1" value="3" />
+                            </label>
+                            <label class="field field--label">
+                                Label
+                                <input type="text" id="input-label" placeholder="Item label" />
+                            </label>
+                            <label class="field field--color color-picker">
+                                Color
+                                <input type="color" id="input-color" value="#3a7afe" />
+                            </label>
+                            <button id="create-item" class="primary">Create item</button>
+                        </div>
                         <div class="tools-menu" id="tools-menu-container">
                             <button id="tools-button" class="ghost" type="button">Tools</button>
                             <div id="tools-menu" class="menu" role="menu">
@@ -124,7 +126,7 @@
             </header>
 
             <div class="workspace-body">
-                <aside id="history-sidebar" class="sidebar">
+                <aside id="history-sidebar" class="sidebar hidden">
                     <h2>Item overview</h2>
                     <div class="list-controls">
                         <label class="search-field" for="history-search">
