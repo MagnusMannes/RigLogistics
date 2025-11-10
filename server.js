@@ -22,6 +22,21 @@ const DEFAULT_DECK_NAMES = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C
 
 let state = { version: 1, decks: [] };
 
+const ALLOWED_ITEM_SHAPES = new Set([
+  'rectangle',
+  'circle',
+  'triangle-right',
+  'triangle-equilateral'
+]);
+
+function normalizeItemShape(shape) {
+  if (typeof shape !== 'string') {
+    return 'rectangle';
+  }
+  const normalized = shape.trim().toLowerCase();
+  return ALLOWED_ITEM_SHAPES.has(normalized) ? normalized : 'rectangle';
+}
+
 function generateId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -78,6 +93,8 @@ function normalizeLayoutEntry(entry) {
     const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : generateId('item');
     const color = typeof entry.color === 'string' && entry.color.trim() ? entry.color.trim() : '#3a7afe';
     const comment = typeof entry.comment === 'string' ? entry.comment : '';
+    const shape = normalizeItemShape(entry.shape);
+    const deckLayer = entry.deckLayer === true || entry.deckLayer === 'true';
     const attachments = Array.isArray(entry.attachments)
       ? entry.attachments.map((item) => normalizeAttachment(item)).filter(Boolean)
       : [];
@@ -109,6 +126,8 @@ function normalizeLayoutEntry(entry) {
       locked,
       color,
       comment,
+      shape,
+      deckLayer,
       attachments,
       history,
       lastModified,

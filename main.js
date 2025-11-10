@@ -1588,8 +1588,8 @@ function handleCreatePlanningJob() {
 
 const workspaceState = {
     scale: BASE_SCALE,
-    translateX: -workspaceContent.offsetWidth / 2,
-    translateY: -workspaceContent.offsetHeight / 2,
+    translateX: 0,
+    translateY: 0,
 };
 
 function calculateCenteredPosition(widthMeters, heightMeters) {
@@ -2241,6 +2241,8 @@ function selectDeck(deck) {
     itemHistories.clear();
     loadWorkspaceLayout(Array.isArray(currentDeck.layout) ? currentDeck.layout : []);
     workspaceState.scale = BASE_SCALE;
+    workspaceState.translateX = 0;
+    workspaceState.translateY = 0;
     applyWorkspaceTransform();
     closeToolsMenu();
     renderPlanningJobs();
