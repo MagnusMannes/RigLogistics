@@ -56,14 +56,14 @@
                     <div class="deck-modify-escape">click Escape button to leave modify mode</div>
                 </div>
                 <div class="left-controls">
-                    <div class="nav-controls">
-                        <button id="back-button" class="ghost">
-                            <span aria-hidden="true">←</span>
-                            <span class="label">Decks</span>
-                        </button>
-                        <button id="toggle-sidebar" class="ghost">Toggle list</button>
-                    </div>
                     <div class="toolbar">
+                        <div class="toolbar-nav">
+                            <button id="back-button" class="ghost">
+                                <span aria-hidden="true">←</span>
+                                <span class="label">Decks</span>
+                            </button>
+                            <button id="toggle-sidebar" class="ghost" aria-pressed="false">Show list</button>
+                        </div>
                         <label>
                             W (m)
                             <input type="number" id="input-width" min="0.5" step="0.1" value="5" />
@@ -124,7 +124,7 @@
             </header>
 
             <div class="workspace-body">
-                <aside id="history-sidebar" class="sidebar">
+                <aside id="history-sidebar" class="sidebar hidden">
                     <h2>Item overview</h2>
                     <div class="list-controls">
                         <label class="search-field" for="history-search">
