@@ -12,6 +12,130 @@ const io = new Server(server, {
   }
 });
 
+const MAX_TRACKED_ROUTES = 50;
+const FALLBACK_ROUTE_KEY = 'OTHER';
+
+function createBandwidthStats() {
+  return {
+    startedAt: new Date().toISOString(),
+    totalInboundBytes: 0,
+    totalOutboundBytes: 0,
+    routes: new Map()
+  };
+}
+
+let bandwidthStats = createBandwidthStats();
+
+function resetBandwidthStats() {
+  bandwidthStats = createBandwidthStats();
+}
+
+function getRouteIdentifier(req) {
+  const method = typeof req.method === 'string' ? req.method.toUpperCase() : 'GET';
+  if (req.route && req.route.path) {
+    const base = typeof req.baseUrl === 'string' ? req.baseUrl : '';
+    return `${method} ${base}${req.route.path}`;
+  }
+  if (typeof req.originalUrl === 'string' && req.originalUrl) {
+    const [pathWithoutQuery] = req.originalUrl.split('?');
+    return `${method} ${pathWithoutQuery || '/'}`;
+  }
+  if (typeof req.url === 'string' && req.url) {
+    const [pathWithoutQuery] = req.url.split('?');
+    return `${method} ${pathWithoutQuery || '/'}`;
+  }
+  return method;
+}
+
+function getOrCreateRouteStats(routeKey) {
+  if (bandwidthStats.routes.has(routeKey)) {
+    return bandwidthStats.routes.get(routeKey);
+  }
+  if (bandwidthStats.routes.size >= MAX_TRACKED_ROUTES) {
+    if (!bandwidthStats.routes.has(FALLBACK_ROUTE_KEY)) {
+      bandwidthStats.routes.set(FALLBACK_ROUTE_KEY, {
+        hits: 0,
+        inboundBytes: 0,
+        outboundBytes: 0
+      });
+    }
+    return bandwidthStats.routes.get(FALLBACK_ROUTE_KEY);
+  }
+  const stats = {
+    hits: 0,
+    inboundBytes: 0,
+    outboundBytes: 0
+  };
+  bandwidthStats.routes.set(routeKey, stats);
+  return stats;
+}
+
+function recordBandwidthUsage(req, inboundBytes, outboundBytes) {
+  const safeInbound = Number.isFinite(inboundBytes) && inboundBytes > 0 ? inboundBytes : 0;
+  const safeOutbound = Number.isFinite(outboundBytes) && outboundBytes > 0 ? outboundBytes : 0;
+  const routeKey = getRouteIdentifier(req);
+  bandwidthStats.totalInboundBytes += safeInbound;
+  bandwidthStats.totalOutboundBytes += safeOutbound;
+  const routeStats = getOrCreateRouteStats(routeKey);
+  if (!routeStats) {
+    return;
+  }
+  routeStats.hits += 1;
+  routeStats.inboundBytes += safeInbound;
+  routeStats.outboundBytes += safeOutbound;
+}
+
+function trackBandwidthMiddleware(req, res, next) {
+  const socket = req.socket;
+  const startRead = socket?.bytesRead || 0;
+  const startWritten = socket?.bytesWritten || 0;
+  res.on('finish', () => {
+    const currentSocket = req.socket;
+    if (!currentSocket) {
+      return;
+    }
+    const inbound = Math.max(0, (currentSocket.bytesRead || 0) - startRead);
+    const outbound = Math.max(0, (currentSocket.bytesWritten || 0) - startWritten);
+    recordBandwidthUsage(req, inbound, outbound);
+  });
+  next();
+}
+
+function snapshotBandwidthStats() {
+  const routes = Array.from(bandwidthStats.routes.entries())
+    .map(([route, stats]) => ({
+      route,
+      hits: stats.hits,
+      inboundBytes: stats.inboundBytes,
+      outboundBytes: stats.outboundBytes
+    }))
+    .sort((a, b) => {
+      if (b.outboundBytes !== a.outboundBytes) {
+        return b.outboundBytes - a.outboundBytes;
+      }
+      return b.inboundBytes - a.inboundBytes;
+    });
+  return {
+    startedAt: bandwidthStats.startedAt,
+    generatedAt: new Date().toISOString(),
+    totalInboundBytes: bandwidthStats.totalInboundBytes,
+    totalOutboundBytes: bandwidthStats.totalOutboundBytes,
+    routes
+  };
+}
+
+function shouldResetMetrics(value) {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes';
+  }
+  if (typeof value === 'number') {
+    return value === 1;
+  }
+  return Boolean(value);
+}
+
+app.use(trackBandwidthMiddleware);
 app.use(express.json({ limit: '25mb' }));
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -249,6 +373,16 @@ app.post('/api/state', async (req, res) => {
     console.error('Failed to save state', error);
     res.status(500).json({ error: 'Failed to save state' });
   }
+});
+
+app.get('/api/metrics/bandwidth', (req, res) => {
+  const shouldReset = shouldResetMetrics(req.query?.reset);
+  const snapshot = snapshotBandwidthStats();
+  snapshot.resetApplied = Boolean(shouldReset);
+  if (shouldReset) {
+    resetBandwidthStats();
+  }
+  res.json(snapshot);
 });
 
 app.get('/', (req, res) => {
