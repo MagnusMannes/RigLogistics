@@ -812,6 +812,12 @@ button.icon-button {
     box-shadow: 0 10px 25px rgba(14, 165, 233, 0.2);
     font-size: 1.4rem;
     white-space: normal;
+    z-index: 1;
+}
+
+.planning-overlay-item.deck-layer-item {
+    z-index: 0;
+    box-shadow: 0 6px 18px rgba(14, 165, 233, 0.18);
 }
 
 .planning-overlay-item.item {
