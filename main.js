@@ -239,32 +239,62 @@ function setItemShape(element, shape, { recordHistory = true } = {}) {
     updateItemRecord(element, message, { updateComment: false, updateDeck: false });
 }
 
-function setItemDeckLayerState(element, deckLayer, { recordHistory = true } = {}) {
+function getLayerMovementState(element) {
     if (!element || element.dataset.type !== 'item') {
-        return;
+        return { canMoveUp: false, canMoveDown: false };
     }
-    const shouldEnable = deckLayer === true || deckLayer === 'true';
-    const currentlyEnabled = isItemOnDeckLayer(element);
-    if (currentlyEnabled === shouldEnable) {
-        return;
+    const container = element.parentElement;
+    if (!container) {
+        return { canMoveUp: false, canMoveDown: false };
     }
-    element.dataset.deckLayer = shouldEnable ? 'true' : 'false';
-    applyItemDeckLayerStyles(element);
+    const siblings = Array.from(container.children).filter((child) => child.dataset?.type === 'item');
+    const index = siblings.indexOf(element);
+    return {
+        canMoveDown: index > 0,
+        canMoveUp: index > -1 && index < siblings.length - 1,
+    };
+}
+
+function moveItemLayer(element, direction) {
+    if (!element || element.dataset.type !== 'item') {
+        return false;
+    }
+    const container = element.parentElement;
+    if (!container) {
+        return false;
+    }
+    const siblings = Array.from(container.children).filter((child) => child.dataset?.type === 'item');
+    if (siblings.length <= 1) {
+        return false;
+    }
+    const currentIndex = siblings.indexOf(element);
+    if (currentIndex === -1) {
+        return false;
+    }
+    const normalizedDirection = direction > 0 ? 1 : -1;
+    const targetIndex = normalizedDirection > 0
+        ? Math.min(siblings.length - 1, currentIndex + 1)
+        : Math.max(0, currentIndex - 1);
+    if (targetIndex === currentIndex) {
+        return false;
+    }
+    const referenceSibling = siblings[targetIndex];
+    if (normalizedDirection > 0) {
+        container.insertBefore(element, referenceSibling.nextSibling);
+    } else {
+        container.insertBefore(element, referenceSibling);
+    }
     if (isPlanningItem(element)) {
-        if (recordHistory) {
-            persistCurrentPlanningJob();
-        }
-        return;
+        persistCurrentPlanningJob();
+    } else {
+        const labelSuffix = getItemHistoryLabel(element);
+        const message = normalizedDirection > 0
+            ? `Item moved up${labelSuffix}`
+            : `Item moved down${labelSuffix}`;
+        addHistoryEntry(message);
+        updateItemRecord(element, message, { updateComment: false, updateDeck: false });
     }
-    if (!recordHistory) {
-        return;
-    }
-    const labelSuffix = getItemHistoryLabel(element);
-    const message = shouldEnable
-        ? `Item moved to deck surface${labelSuffix}`
-        : `Item restored to default layer${labelSuffix}`;
-    addHistoryEntry(message);
-    updateItemRecord(element, message, { updateComment: false, updateDeck: false });
+    return true;
 }
 
 function getDeckAreaElements() {
@@ -3071,24 +3101,49 @@ function openItemModifyDialog(element) {
     const layerLegend = document.createElement('legend');
     layerLegend.textContent = 'Layering';
     layerFieldset.appendChild(layerLegend);
-    const deckLayerButton = document.createElement('button');
-    deckLayerButton.type = 'button';
-    deckLayerButton.className = 'ghost deck-layer-button';
-    const updateDeckLayerButton = () => {
-        const deckLayerEnabled = isItemOnDeckLayer(element);
-        deckLayerButton.textContent = deckLayerEnabled
-            ? 'Restore default layer'
-            : 'Place under other items';
-        deckLayerButton.setAttribute('aria-pressed', deckLayerEnabled ? 'true' : 'false');
+    const layerButtonGroup = document.createElement('div');
+    layerButtonGroup.className = 'layering-button-group';
+
+    const moveDownButton = document.createElement('button');
+    moveDownButton.type = 'button';
+    moveDownButton.className = 'ghost';
+    moveDownButton.textContent = 'Move down';
+
+    const moveUpButton = document.createElement('button');
+    moveUpButton.type = 'button';
+    moveUpButton.className = 'ghost';
+    moveUpButton.textContent = 'Move up';
+
+    const updateLayerButtons = () => {
+        const { canMoveDown, canMoveUp } = getLayerMovementState(element);
+        const disableDown = locked || !canMoveDown;
+        const disableUp = locked || !canMoveUp;
+        moveDownButton.disabled = disableDown;
+        moveUpButton.disabled = disableUp;
+        moveDownButton.setAttribute('aria-disabled', disableDown ? 'true' : 'false');
+        moveUpButton.setAttribute('aria-disabled', disableUp ? 'true' : 'false');
     };
-    deckLayerButton.addEventListener('click', () => {
+
+    moveDownButton.addEventListener('click', () => {
         if (locked) {
             return;
         }
-        setItemDeckLayerState(element, !isItemOnDeckLayer(element));
-        updateDeckLayerButton();
+        if (moveItemLayer(element, -1)) {
+            updateLayerButtons();
+        }
     });
-    layerFieldset.appendChild(deckLayerButton);
+
+    moveUpButton.addEventListener('click', () => {
+        if (locked) {
+            return;
+        }
+        if (moveItemLayer(element, 1)) {
+            updateLayerButtons();
+        }
+    });
+
+    layerButtonGroup.append(moveDownButton, moveUpButton);
+    layerFieldset.appendChild(layerButtonGroup);
 
     const actions = document.createElement('div');
     actions.className = 'modify-actions';
@@ -3153,7 +3208,7 @@ function openItemModifyDialog(element) {
     document.addEventListener('keydown', handleModifyDialogKeydown);
 
     updateShapeButtons();
-    updateDeckLayerButton();
+    updateLayerButtons();
 
     if (locked) {
         widthInput.disabled = true;
@@ -3165,8 +3220,10 @@ function openItemModifyDialog(element) {
             button.disabled = true;
             button.setAttribute('aria-disabled', 'true');
         });
-        deckLayerButton.disabled = true;
-        deckLayerButton.setAttribute('aria-disabled', 'true');
+        moveDownButton.disabled = true;
+        moveDownButton.setAttribute('aria-disabled', 'true');
+        moveUpButton.disabled = true;
+        moveUpButton.setAttribute('aria-disabled', 'true');
     }
 
     form.addEventListener('submit', (event) => {
