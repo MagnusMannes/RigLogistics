@@ -1437,14 +1437,8 @@ button.icon-button {
     box-shadow: 0 10px 24px rgba(58, 122, 254, 0.25);
 }
 
-.layering-button-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-.layering-button-group button {
-    flex: 1 1 140px;
+.deck-layer-button {
+    align-self: flex-start;
 }
 
 .modify-actions {
