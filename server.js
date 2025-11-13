@@ -153,7 +153,22 @@ function normalizePlanningItem(item) {
   const locked = item.locked === true || item.locked === 'true';
   const color = typeof item.color === 'string' && item.color.trim() ? item.color.trim() : '#3a7afe';
   const comment = typeof item.comment === 'string' ? item.comment : '';
-  return { type: 'item', label, width, height, x, y, rotation, locked, color, comment };
+  const shape = normalizeItemShape(item.shape);
+  const deckLayer = item.deckLayer === true || item.deckLayer === 'true';
+  return {
+    type: 'item',
+    label,
+    width,
+    height,
+    x,
+    y,
+    rotation,
+    locked,
+    color,
+    comment,
+    shape,
+    deckLayer
+  };
 }
 
 function normalizePlanningJob(job) {
