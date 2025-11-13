@@ -1111,6 +1111,9 @@ function renderPlanningJobOverlay(job) {
         element.style.width = `${widthPixels}px`;
         element.style.height = `${heightPixels}px`;
         element.style.transform = `translate(${item.x}px, ${item.y}px) rotate(${item.rotation}deg)`;
+        const deckLayerEnabled = item.deckLayer === true || item.deckLayer === 'true';
+        element.classList.toggle('deck-layer-item', deckLayerEnabled);
+        element.style.zIndex = deckLayerEnabled ? '0' : '1';
         if (item.type === 'item') {
             const color = item.color || '#3a7afe';
             element.style.background = color;
