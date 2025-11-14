@@ -1904,6 +1904,27 @@ function drawRotatedRect(doc, x, y, width, height, rotationDegrees, style = 'S')
     doc.lines(segments, corners[0].x, corners[0].y, [1, 1], style, true);
 }
 
+function fitTextWithinRect(doc, text, width, height, { maxFontSize = 10, minFontSize = 6, lineHeight = 1.2 } = {}) {
+    const safeText = typeof text === 'string' ? text.trim() : '';
+    if (!safeText) {
+        return { lines: [], fontSize: minFontSize };
+    }
+    const safeWidth = Math.max(width - 2, 4);
+    const safeHeight = Math.max(height - 2, minFontSize);
+    let fontSize = maxFontSize;
+    let lines = [];
+    while (fontSize >= minFontSize) {
+        doc.setFontSize(fontSize);
+        lines = doc.splitTextToSize(safeText, safeWidth);
+        const totalHeight = lines.length * fontSize * lineHeight;
+        if (totalHeight <= safeHeight || fontSize === minFontSize) {
+            return { lines, fontSize };
+        }
+        fontSize = Math.max(fontSize - 0.5, minFontSize);
+    }
+    return { lines, fontSize: minFontSize };
+}
+
 function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title, hideItemLabels = false } = {}) {
     const deckName = deck?.name || 'Deck';
     const safeBounds = bounds || getDeckBounds(entries);
@@ -1952,23 +1973,37 @@ function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title, hideI
             doc.setFillColor(241, 245, 249);
             doc.setDrawColor(15, 23, 42);
             drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
-            doc.setFontSize(10);
             doc.setTextColor(15, 23, 42);
-            const deckText = doc.splitTextToSize(label, Math.max(width - 2, 10));
-            doc.text(deckText, x + width / 2, y + height / 2, { align: 'center', baseline: 'middle' });
+            const deckTextLayout = fitTextWithinRect(doc, label, width, height, {
+                maxFontSize: 11,
+                minFontSize: 6,
+            });
+            doc.setFontSize(deckTextLayout.fontSize);
+            doc.text(deckTextLayout.lines, x + width / 2, y + height / 2, {
+                align: 'center',
+                baseline: 'middle',
+            });
         } else {
             const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
             doc.setFillColor(r, g, b);
             doc.setDrawColor(15, 23, 42);
             drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
             if (!hideItemLabels) {
-                doc.setFontSize(9);
                 const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
                 doc.setTextColor(textColor, textColor, textColor);
-                const itemText = doc.splitTextToSize(label, Math.max(width - 2, 8));
+                const itemTextLayout = fitTextWithinRect(doc, label, width, height, {
+                    maxFontSize: 9,
+                    minFontSize: 5,
+                    lineHeight: 1.15,
+                });
+                doc.setFontSize(itemTextLayout.fontSize);
+                const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
                 if (hasRotation) {
                     const anchor = rotatePoint(x + 1, y + 3, centerX, centerY, rotationRadians);
-                    doc.text(itemText, anchor.x, anchor.y, { baseline: 'top', angle: rotationDegrees });
+                    doc.text(itemText, anchor.x, anchor.y, {
+                        baseline: 'top',
+                        angle: rotationDegrees,
+                    });
                 } else {
                     doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
                 }
