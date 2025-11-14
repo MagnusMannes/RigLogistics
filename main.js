@@ -532,7 +532,7 @@ function setPrintToPdfButtonBusy(isBusy) {
     if (!printToPdfButton) {
         return;
     }
-    const defaultLabel = printToPdfButton.dataset.originalLabel || printToPdfButton.textContent || 'Print decks to PDF';
+    const defaultLabel = printToPdfButton.dataset.originalLabel || printToPdfButton.textContent || 'Print deck to PDF';
     if (!printToPdfButton.dataset.originalLabel) {
         printToPdfButton.dataset.originalLabel = defaultLabel;
     }
@@ -546,41 +546,46 @@ function setPrintToPdfButtonBusy(isBusy) {
 }
 
 async function handlePrintToPdf() {
-    if (!Array.isArray(decks) || !decks.length) {
-        alert('Create a deck before printing to PDF.');
+    if (!currentDeck) {
+        alert('Select a deck before printing to PDF.');
         return;
     }
     setPrintToPdfButtonBusy(true);
     try {
-        const printableDecks = decks
-            .map((deck) => ({ deck, entries: normalizeDeckLayoutForPrint(deck) }))
-            .filter((entry) => entry.deck);
-        if (!printableDecks.length) {
-            alert('No decks available to print yet.');
-            return;
-        }
+        const entries = normalizeDeckLayoutForPrint(currentDeck);
         const jsPdfConstructor = await ensureJsPdfLoaded();
-        const deckPages = printableDecks.map((data) => {
-            const bounds = getDeckBounds(data.entries);
-            return {
-                ...data,
-                bounds,
-                orientation: determineDeckPageOrientation(bounds),
-            };
-        });
-        const firstOrientation = deckPages[0]?.orientation || 'landscape';
+        const deckBounds = getDeckBounds(entries);
+        const firstOrientation = determineDeckPageOrientation(deckBounds);
         const doc = new jsPdfConstructor({ orientation: firstOrientation, unit: 'mm', format: 'a4' });
-        deckPages.forEach((page, index) => {
-            if (index > 0) {
-                doc.addPage('a4', page.orientation);
+        renderDeckOnPdf(doc, currentDeck, entries, { bounds: deckBounds, orientation: firstOrientation });
+
+        const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
+        const deckAreaGroups = groupDeckAreasForPrint(deckAreas);
+        deckAreaGroups.forEach((group) => {
+            const groupEntries = buildDeckAreaGroupEntries(group, entries);
+            if (!groupEntries.length) {
+                return;
             }
-            renderDeckOnPdf(doc, page.deck, page.entries, { bounds: page.bounds, orientation: page.orientation });
+            const groupBounds = buildDeckAreaGroupBounds(groupEntries);
+            const orientation = determineDeckPageOrientation(groupBounds);
+            doc.addPage('a4', orientation);
+            renderDeckOnPdf(doc, currentDeck, groupEntries, {
+                bounds: groupBounds,
+                orientation,
+                title: buildDeckAreaGroupTitle(currentDeck?.name, group),
+            });
         });
-        const tableRows = buildItemTableRows();
+
+        const tableRows = buildItemTableRows(currentDeck, entries);
         const shouldStartSummaryOnNewPage = doc.getNumberOfPages() > 0;
         renderItemsSummaryTable(doc, tableRows, shouldStartSummaryOnNewPage);
         const timestamp = new Date().toISOString().split('T')[0];
-        doc.save(`rig-logistics-decks-${timestamp}.pdf`);
+        const deckSlug = (currentDeck.name || 'deck')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '')
+            .replace(/-{2,}/g, '-') || 'deck';
+        doc.save(`rig-logistics-${deckSlug}-${timestamp}.pdf`);
     } catch (error) {
         console.error('Failed to generate PDF', error);
         alert('Unable to generate the PDF. Please try again.');
@@ -1608,32 +1613,27 @@ function getItemLocationLabel(item, deckAreas, deckName) {
     return `${deckLabel} – ${areaLabel}`;
 }
 
-function buildItemTableRows() {
-    if (!Array.isArray(decks)) {
+function buildItemTableRows(deck, entriesOverride) {
+    if (!deck) {
         return [];
     }
+    const deckEntries = Array.isArray(entriesOverride) ? entriesOverride : normalizeDeckLayoutForPrint(deck);
     const rows = [];
-    decks.forEach((deck) => {
-        if (!deck) {
-            return;
-        }
-        const entries = normalizeDeckLayoutForPrint(deck);
-        const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
-        entries
-            .filter((entry) => entry.type === 'item')
-            .forEach((item) => {
-                const lastModified = new Date(item.lastModified || Date.now());
-                if (Number.isNaN(lastModified.getTime())) {
-                    lastModified.setTime(Date.now());
-                }
-                rows.push({
-                    itemLabel: item.label || 'Item',
-                    locationLabel: getItemLocationLabel(item, deckAreas, deck.name),
-                    lastModified,
-                    comment: item.comment || '',
-                });
+    const deckAreas = deckEntries.filter((entry) => entry.type === 'deck-area');
+    deckEntries
+        .filter((entry) => entry.type === 'item')
+        .forEach((item) => {
+            const lastModified = new Date(item.lastModified || Date.now());
+            if (Number.isNaN(lastModified.getTime())) {
+                lastModified.setTime(Date.now());
+            }
+            rows.push({
+                itemLabel: item.label || 'Item',
+                locationLabel: getItemLocationLabel(item, deckAreas, deck.name),
+                lastModified,
+                comment: item.comment || '',
             });
-    });
+        });
     rows.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
     return rows;
 }
@@ -1675,7 +1675,139 @@ function drawDeckAreaConnections(doc, deckAreas, bounds, scale, offsetX, offsetY
     }
 }
 
-function renderDeckOnPdf(doc, deck, entries, { bounds, orientation }) {
+function getDeckAreaMetrics(entry) {
+    const widthMeters = Number(entry.width) || DEFAULT_DECK_AREA_SIZE_METERS;
+    const heightMeters = Number(entry.height) || DEFAULT_DECK_AREA_SIZE_METERS;
+    const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
+    const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
+    return {
+        x: xMeters,
+        y: yMeters,
+        width: widthMeters,
+        height: heightMeters,
+        centerX: xMeters + widthMeters / 2,
+        centerY: yMeters + heightMeters / 2,
+    };
+}
+
+function getItemCenterInMeters(entry) {
+    const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
+    const heightMeters = Number(entry.height) || DEFAULT_ITEM_HEIGHT_METERS;
+    const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
+    const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
+    return {
+        x: xMeters + widthMeters / 2,
+        y: yMeters + heightMeters / 2,
+    };
+}
+
+function isPointInsideDeckArea(pointX, pointY, deckArea) {
+    if (!deckArea) {
+        return false;
+    }
+    const metrics = getDeckAreaMetrics(deckArea);
+    return (
+        pointX >= metrics.x &&
+        pointX <= metrics.x + metrics.width &&
+        pointY >= metrics.y &&
+        pointY <= metrics.y + metrics.height
+    );
+}
+
+function isItemInsideDeckArea(item, deckArea) {
+    if (!item || !deckArea) {
+        return false;
+    }
+    const center = getItemCenterInMeters(item);
+    return isPointInsideDeckArea(center.x, center.y, deckArea);
+}
+
+function isItemInDeckAreaGroup(item, deckAreas) {
+    if (!Array.isArray(deckAreas) || !deckAreas.length) {
+        return false;
+    }
+    return deckAreas.some((area) => isItemInsideDeckArea(item, area));
+}
+
+function groupDeckAreasForPrint(deckAreas, thresholdMeters = 1) {
+    const normalized = Array.isArray(deckAreas)
+        ? deckAreas
+              .map((area) => ({ area, metrics: getDeckAreaMetrics(area) }))
+              .filter((entry) => entry.area)
+        : [];
+    if (!normalized.length) {
+        return [];
+    }
+    const groups = [];
+    const visited = new Set();
+    normalized.forEach((entry) => {
+        if (visited.has(entry.area)) {
+            return;
+        }
+        const stack = [entry];
+        const group = [];
+        visited.add(entry.area);
+        while (stack.length) {
+            const current = stack.pop();
+            group.push(current.area);
+            normalized.forEach((candidate) => {
+                if (visited.has(candidate.area)) {
+                    return;
+                }
+                const distance = Math.hypot(
+                    candidate.metrics.centerX - current.metrics.centerX,
+                    candidate.metrics.centerY - current.metrics.centerY
+                );
+                if (distance < thresholdMeters) {
+                    visited.add(candidate.area);
+                    stack.push(candidate);
+                }
+            });
+        }
+        groups.push(group);
+    });
+    return groups;
+}
+
+function buildDeckAreaGroupEntries(deckAreas, deckEntries) {
+    if (!Array.isArray(deckAreas) || !deckAreas.length) {
+        return [];
+    }
+    const items = Array.isArray(deckEntries)
+        ? deckEntries.filter((entry) => entry.type === 'item' && isItemInDeckAreaGroup(entry, deckAreas))
+        : [];
+    return [...deckAreas, ...items];
+}
+
+function buildDeckAreaGroupBounds(entries, padding = 0.5) {
+    const baseBounds = getDeckBounds(entries);
+    const safePadding = Number.isFinite(padding) ? Math.max(0, padding) : 0;
+    const minX = baseBounds.minX - safePadding;
+    const minY = baseBounds.minY - safePadding;
+    const maxX = baseBounds.maxX + safePadding;
+    const maxY = baseBounds.maxY + safePadding;
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        width: Math.max(maxX - minX, 0.5),
+        height: Math.max(maxY - minY, 0.5),
+    };
+}
+
+function buildDeckAreaGroupTitle(deckName, deckAreas) {
+    const deckLabel = deckName || 'Deck';
+    if (!Array.isArray(deckAreas) || !deckAreas.length) {
+        return deckLabel;
+    }
+    const labels = deckAreas
+        .map((area) => (typeof area.label === 'string' && area.label.trim() ? area.label.trim() : 'Deck area'))
+        .filter((value, index, array) => array.indexOf(value) === index);
+    return `${deckLabel} – ${labels.join(' + ')}`;
+}
+
+function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title } = {}) {
     const deckName = deck?.name || 'Deck';
     const safeBounds = bounds || getDeckBounds(entries);
     const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
@@ -1691,9 +1823,10 @@ function renderDeckOnPdf(doc, deck, entries, { bounds, orientation }) {
     const offsetX = margin;
     const offsetY = drawingTop;
 
+    const pageTitle = typeof title === 'string' && title.trim() ? title.trim() : deckName;
     doc.setFontSize(16);
     doc.setTextColor(15, 23, 42);
-    doc.text(deckName, margin, headerY);
+    doc.text(pageTitle, margin, headerY);
 
     if (!entries.length) {
         doc.setFontSize(12);
