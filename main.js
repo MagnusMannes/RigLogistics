@@ -557,7 +557,11 @@ async function handlePrintToPdf() {
         const deckBounds = getDeckBounds(entries);
         const firstOrientation = determineDeckPageOrientation(deckBounds);
         const doc = new jsPdfConstructor({ orientation: firstOrientation, unit: 'mm', format: 'a4' });
-        renderDeckOnPdf(doc, currentDeck, entries, { bounds: deckBounds, orientation: firstOrientation });
+        renderDeckOnPdf(doc, currentDeck, entries, {
+            bounds: deckBounds,
+            orientation: firstOrientation,
+            hideItemLabels: true,
+        });
 
         const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
         const deckAreaGroups = groupDeckAreasForPrint(deckAreas);
@@ -1498,10 +1502,29 @@ function getDeckBounds(entries) {
         const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
         const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
         const heightMeters = Number(entry.height) || DEFAULT_ITEM_HEIGHT_METERS;
-        minX = Math.min(minX, xMeters);
-        minY = Math.min(minY, yMeters);
-        maxX = Math.max(maxX, xMeters + widthMeters);
-        maxY = Math.max(maxY, yMeters + heightMeters);
+        const rotationDegrees = normalizeRotationDegrees(entry.rotation);
+        if (Math.abs(rotationDegrees) < 0.01) {
+            minX = Math.min(minX, xMeters);
+            minY = Math.min(minY, yMeters);
+            maxX = Math.max(maxX, xMeters + widthMeters);
+            maxY = Math.max(maxY, yMeters + heightMeters);
+        } else {
+            const radians = degreesToRadians(rotationDegrees);
+            const centerX = xMeters + widthMeters / 2;
+            const centerY = yMeters + heightMeters / 2;
+            const corners = [
+                rotatePoint(xMeters, yMeters, centerX, centerY, radians),
+                rotatePoint(xMeters + widthMeters, yMeters, centerX, centerY, radians),
+                rotatePoint(xMeters + widthMeters, yMeters + heightMeters, centerX, centerY, radians),
+                rotatePoint(xMeters, yMeters + heightMeters, centerX, centerY, radians),
+            ];
+            corners.forEach((corner) => {
+                minX = Math.min(minX, corner.x);
+                minY = Math.min(minY, corner.y);
+                maxX = Math.max(maxX, corner.x);
+                maxY = Math.max(maxY, corner.y);
+            });
+        }
     });
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
         return { minX: 0, minY: 0, maxX: 10, maxY: 10, width: 10, height: 10 };
@@ -1807,7 +1830,81 @@ function buildDeckAreaGroupTitle(deckName, deckAreas) {
     return `${deckLabel} – ${labels.join(' + ')}`;
 }
 
-function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title } = {}) {
+function sortEntriesForPdf(entries) {
+    if (!Array.isArray(entries)) {
+        return [];
+    }
+    return entries.slice().sort((a, b) => getEntryRenderPriority(a) - getEntryRenderPriority(b));
+}
+
+function getEntryRenderPriority(entry) {
+    if (!entry) {
+        return 0;
+    }
+    if (entry.type === 'deck-area') {
+        return 0;
+    }
+    if (entry.deckLayer === true || entry.deckLayer === 'true') {
+        return 1;
+    }
+    return 2;
+}
+
+function normalizeRotationDegrees(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+    let rotation = numeric % 360;
+    if (rotation > 180) {
+        rotation -= 360;
+    } else if (rotation < -180) {
+        rotation += 360;
+    }
+    return rotation;
+}
+
+function degreesToRadians(value) {
+    return (value * Math.PI) / 180;
+}
+
+function rotatePoint(pointX, pointY, centerX, centerY, radians) {
+    if (!Number.isFinite(radians) || radians === 0) {
+        return { x: pointX, y: pointY };
+    }
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const dx = pointX - centerX;
+    const dy = pointY - centerY;
+    return {
+        x: centerX + dx * cos - dy * sin,
+        y: centerY + dx * sin + dy * cos,
+    };
+}
+
+function drawRotatedRect(doc, x, y, width, height, rotationDegrees, style = 'S') {
+    const normalized = normalizeRotationDegrees(rotationDegrees);
+    if (Math.abs(normalized) < 0.01) {
+        doc.rect(x, y, width, height, style);
+        return;
+    }
+    const radians = degreesToRadians(normalized);
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const corners = [
+        rotatePoint(x, y, centerX, centerY, radians),
+        rotatePoint(x + width, y, centerX, centerY, radians),
+        rotatePoint(x + width, y + height, centerX, centerY, radians),
+        rotatePoint(x, y + height, centerX, centerY, radians),
+    ];
+    const segments = corners.map((corner, index) => {
+        const next = corners[(index + 1) % corners.length];
+        return [next.x - corner.x, next.y - corner.y];
+    });
+    doc.lines(segments, corners[0].x, corners[0].y, [1, 1], style, true);
+}
+
+function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title, hideItemLabels = false } = {}) {
     const deckName = deck?.name || 'Deck';
     const safeBounds = bounds || getDeckBounds(entries);
     const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
@@ -1828,13 +1925,15 @@ function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title } = {}
     doc.setTextColor(15, 23, 42);
     doc.text(pageTitle, margin, headerY);
 
-    if (!entries.length) {
+    const sortedEntries = sortEntriesForPdf(entries);
+
+    if (!sortedEntries.length) {
         doc.setFontSize(12);
         doc.text('No layout data for this deck yet.', margin, headerY + 8);
         return;
     }
 
-    entries.forEach((entry) => {
+    sortedEntries.forEach((entry) => {
         const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
         const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
         const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
@@ -1844,10 +1943,15 @@ function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title } = {}
         const width = widthMeters * scale;
         const height = heightMeters * scale;
         const label = entry.label || (entry.type === 'deck-area' ? 'Deck area' : 'Item');
+        const rotationDegrees = normalizeRotationDegrees(entry.rotation);
+        const hasRotation = Math.abs(rotationDegrees) > 0.01;
+        const rotationRadians = hasRotation ? degreesToRadians(rotationDegrees) : 0;
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
         if (entry.type === 'deck-area') {
             doc.setFillColor(241, 245, 249);
             doc.setDrawColor(15, 23, 42);
-            doc.rect(x, y, width, height, 'FD');
+            drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
             doc.setFontSize(10);
             doc.setTextColor(15, 23, 42);
             const deckText = doc.splitTextToSize(label, Math.max(width - 2, 10));
@@ -1856,16 +1960,23 @@ function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title } = {}
             const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
             doc.setFillColor(r, g, b);
             doc.setDrawColor(15, 23, 42);
-            doc.rect(x, y, width, height, 'FD');
-            doc.setFontSize(9);
-            const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
-            doc.setTextColor(textColor, textColor, textColor);
-            const itemText = doc.splitTextToSize(label, Math.max(width - 2, 8));
-            doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
+            drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
+            if (!hideItemLabels) {
+                doc.setFontSize(9);
+                const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
+                doc.setTextColor(textColor, textColor, textColor);
+                const itemText = doc.splitTextToSize(label, Math.max(width - 2, 8));
+                if (hasRotation) {
+                    const anchor = rotatePoint(x + 1, y + 3, centerX, centerY, rotationRadians);
+                    doc.text(itemText, anchor.x, anchor.y, { baseline: 'top', angle: rotationDegrees });
+                } else {
+                    doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
+                }
+            }
         }
     });
 
-    const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
+    const deckAreas = sortedEntries.filter((entry) => entry.type === 'deck-area');
     drawDeckAreaConnections(doc, deckAreas, safeBounds, scale, offsetX, offsetY);
 }
 
