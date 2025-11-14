@@ -43,6 +43,7 @@ const deckModifyToggleBtn = document.getElementById('deck-modify-toggle');
 const deckDownloadButton = document.getElementById('deck-download-button');
 const deckUploadButton = document.getElementById('deck-upload-button');
 const deckAddAreaButton = document.getElementById('deck-add-area-button');
+const printToPdfButton = document.getElementById('print-to-pdf-button');
 const toolsMenuContainer = document.getElementById('tools-menu-container');
 const toolsMenuMobileAnchor = document.getElementById('tools-menu-mobile-anchor');
 const toolsButton = document.getElementById('tools-button');
@@ -170,6 +171,7 @@ let isApplyingRemoteState = false;
 let isLoadingWorkspace = false;
 let socket = null;
 let pendingStateVersion = null;
+let jsPdfLoaderPromise = null;
 
 function normalizeItemShape(shape) {
     if (typeof shape !== 'string') {
@@ -523,6 +525,67 @@ function handleDeckModifyKeydown(event) {
     if (event.key === 'Escape') {
         event.preventDefault();
         setDeckModifyMode(false);
+    }
+}
+
+function setPrintToPdfButtonBusy(isBusy) {
+    if (!printToPdfButton) {
+        return;
+    }
+    const defaultLabel = printToPdfButton.dataset.originalLabel || printToPdfButton.textContent || 'Print decks to PDF';
+    if (!printToPdfButton.dataset.originalLabel) {
+        printToPdfButton.dataset.originalLabel = defaultLabel;
+    }
+    if (isBusy) {
+        printToPdfButton.disabled = true;
+        printToPdfButton.textContent = 'Preparing PDF…';
+    } else {
+        printToPdfButton.disabled = false;
+        printToPdfButton.textContent = printToPdfButton.dataset.originalLabel || 'Print decks to PDF';
+    }
+}
+
+async function handlePrintToPdf() {
+    if (!Array.isArray(decks) || !decks.length) {
+        alert('Create a deck before printing to PDF.');
+        return;
+    }
+    setPrintToPdfButtonBusy(true);
+    try {
+        const printableDecks = decks
+            .map((deck) => ({ deck, entries: normalizeDeckLayoutForPrint(deck) }))
+            .filter((entry) => entry.deck);
+        if (!printableDecks.length) {
+            alert('No decks available to print yet.');
+            return;
+        }
+        const jsPdfConstructor = await ensureJsPdfLoaded();
+        const deckPages = printableDecks.map((data) => {
+            const bounds = getDeckBounds(data.entries);
+            return {
+                ...data,
+                bounds,
+                orientation: determineDeckPageOrientation(bounds),
+            };
+        });
+        const firstOrientation = deckPages[0]?.orientation || 'landscape';
+        const doc = new jsPdfConstructor({ orientation: firstOrientation, unit: 'mm', format: 'a4' });
+        deckPages.forEach((page, index) => {
+            if (index > 0) {
+                doc.addPage('a4', page.orientation);
+            }
+            renderDeckOnPdf(doc, page.deck, page.entries, { bounds: page.bounds, orientation: page.orientation });
+        });
+        const tableRows = buildItemTableRows();
+        const shouldStartSummaryOnNewPage = doc.getNumberOfPages() > 0;
+        renderItemsSummaryTable(doc, tableRows, shouldStartSummaryOnNewPage);
+        const timestamp = new Date().toISOString().split('T')[0];
+        doc.save(`rig-logistics-decks-${timestamp}.pdf`);
+    } catch (error) {
+        console.error('Failed to generate PDF', error);
+        alert('Unable to generate the PDF. Please try again.');
+    } finally {
+        setPrintToPdfButtonBusy(false);
     }
 }
 
@@ -1405,6 +1468,342 @@ function serializeWorkspaceItemsForPlanning({ includeDeckAreas = false } = {}) {
             return includeDeckAreas;
         }
         return entry.type === 'item';
+    });
+}
+
+function normalizeDeckLayoutForPrint(deck) {
+    if (!deck || !Array.isArray(deck.layout)) {
+        return [];
+    }
+    return deck.layout
+        .map((entry) => normalizeWorkspaceLayoutEntry(entry))
+        .filter((entry) => entry !== null);
+}
+
+function getDeckBounds(entries) {
+    if (!Array.isArray(entries) || !entries.length) {
+        return { minX: 0, minY: 0, maxX: 10, maxY: 10, width: 10, height: 10 };
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    entries.forEach((entry) => {
+        const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
+        const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
+        const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
+        const heightMeters = Number(entry.height) || DEFAULT_ITEM_HEIGHT_METERS;
+        minX = Math.min(minX, xMeters);
+        minY = Math.min(minY, yMeters);
+        maxX = Math.max(maxX, xMeters + widthMeters);
+        maxY = Math.max(maxY, yMeters + heightMeters);
+    });
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        return { minX: 0, minY: 0, maxX: 10, maxY: 10, width: 10, height: 10 };
+    }
+    const width = Math.max(maxX - minX, 1);
+    const height = Math.max(maxY - minY, 1);
+    return { minX, minY, maxX, maxY, width, height };
+}
+
+function determineDeckPageOrientation(bounds) {
+    if (!bounds) {
+        return 'landscape';
+    }
+    if (bounds.height > bounds.width) {
+        return 'portrait';
+    }
+    return 'landscape';
+}
+
+function getA4Dimensions(orientation = 'landscape') {
+    const isLandscape = orientation === 'landscape';
+    return {
+        width: isLandscape ? 297 : 210,
+        height: isLandscape ? 210 : 297,
+    };
+}
+
+async function ensureJsPdfLoaded() {
+    if (window.jspdf?.jsPDF) {
+        return window.jspdf.jsPDF;
+    }
+    if (!jsPdfLoaderPromise) {
+        jsPdfLoaderPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+            script.async = true;
+            script.onload = () => {
+                if (window.jspdf?.jsPDF) {
+                    resolve(window.jspdf.jsPDF);
+                } else {
+                    reject(new Error('jsPDF did not initialize'));
+                }
+            };
+            script.onerror = () => reject(new Error('Failed to load jsPDF'));
+            document.head.appendChild(script);
+        });
+    }
+    try {
+        return await jsPdfLoaderPromise;
+    } catch (error) {
+        jsPdfLoaderPromise = null;
+        throw error;
+    }
+}
+
+function hexToRgb(color) {
+    if (typeof color !== 'string') {
+        return { r: 58, g: 122, b: 254 };
+    }
+    let hex = color.trim();
+    if (hex.startsWith('#')) {
+        hex = hex.slice(1);
+    }
+    if (hex.length === 3) {
+        hex = hex
+            .split('')
+            .map((char) => char + char)
+            .join('');
+    }
+    if (hex.length !== 6 || /[^0-9a-f]/i.test(hex)) {
+        return { r: 58, g: 122, b: 254 };
+    }
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if ([r, g, b].some((value) => Number.isNaN(value))) {
+        return { r: 58, g: 122, b: 254 };
+    }
+    return { r, g, b };
+}
+
+function getItemLocationLabel(item, deckAreas, deckName) {
+    const deckLabel = deckName || 'Deck';
+    if (!Array.isArray(deckAreas) || !deckAreas.length) {
+        return deckLabel;
+    }
+    const itemX = (Number(item.x) || 0) / PIXELS_PER_METER;
+    const itemY = (Number(item.y) || 0) / PIXELS_PER_METER;
+    const width = Number(item.width) || DEFAULT_ITEM_WIDTH_METERS;
+    const height = Number(item.height) || DEFAULT_ITEM_HEIGHT_METERS;
+    const centerX = itemX + width / 2;
+    const centerY = itemY + height / 2;
+    const containingArea = deckAreas.find((area) => {
+        const areaX = (Number(area.x) || 0) / PIXELS_PER_METER;
+        const areaY = (Number(area.y) || 0) / PIXELS_PER_METER;
+        const areaWidth = Number(area.width) || DEFAULT_DECK_AREA_SIZE_METERS;
+        const areaHeight = Number(area.height) || DEFAULT_DECK_AREA_SIZE_METERS;
+        return (
+            centerX >= areaX &&
+            centerX <= areaX + areaWidth &&
+            centerY >= areaY &&
+            centerY <= areaY + areaHeight
+        );
+    });
+    if (!containingArea) {
+        return deckLabel;
+    }
+    const areaLabel = containingArea.label || 'Deck area';
+    return `${deckLabel} – ${areaLabel}`;
+}
+
+function buildItemTableRows() {
+    if (!Array.isArray(decks)) {
+        return [];
+    }
+    const rows = [];
+    decks.forEach((deck) => {
+        if (!deck) {
+            return;
+        }
+        const entries = normalizeDeckLayoutForPrint(deck);
+        const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
+        entries
+            .filter((entry) => entry.type === 'item')
+            .forEach((item) => {
+                const lastModified = new Date(item.lastModified || Date.now());
+                if (Number.isNaN(lastModified.getTime())) {
+                    lastModified.setTime(Date.now());
+                }
+                rows.push({
+                    itemLabel: item.label || 'Item',
+                    locationLabel: getItemLocationLabel(item, deckAreas, deck.name),
+                    lastModified,
+                    comment: item.comment || '',
+                });
+            });
+    });
+    rows.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
+    return rows;
+}
+
+function formatTableDate(value) {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+        return '';
+    }
+    try {
+        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(value);
+    } catch (error) {
+        return value.toLocaleString();
+    }
+}
+
+function drawDeckAreaConnections(doc, deckAreas, bounds, scale, offsetX, offsetY) {
+    if (!deckAreas.length) {
+        return;
+    }
+    doc.setDrawColor(148, 163, 184);
+    doc.setLineWidth(0.3);
+    for (let i = 0; i < deckAreas.length; i += 1) {
+        for (let j = i + 1; j < deckAreas.length; j += 1) {
+            const a = deckAreas[i];
+            const b = deckAreas[j];
+            const aX = (Number(a.x) || 0) / PIXELS_PER_METER + (Number(a.width) || 0) / 2;
+            const aY = (Number(a.y) || 0) / PIXELS_PER_METER + (Number(a.height) || 0) / 2;
+            const bX = (Number(b.x) || 0) / PIXELS_PER_METER + (Number(b.width) || 0) / 2;
+            const bY = (Number(b.y) || 0) / PIXELS_PER_METER + (Number(b.height) || 0) / 2;
+            const distanceMeters = Math.hypot(aX - bX, aY - bY);
+            if (distanceMeters < 1) {
+                const startX = offsetX + (aX - bounds.minX) * scale;
+                const startY = offsetY + (aY - bounds.minY) * scale;
+                const endX = offsetX + (bX - bounds.minX) * scale;
+                const endY = offsetY + (bY - bounds.minY) * scale;
+                doc.line(startX, startY, endX, endY);
+            }
+        }
+    }
+}
+
+function renderDeckOnPdf(doc, deck, entries, { bounds, orientation }) {
+    const deckName = deck?.name || 'Deck';
+    const safeBounds = bounds || getDeckBounds(entries);
+    const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
+    const { width: pageWidth, height: pageHeight } = getA4Dimensions(pageOrientation);
+    const margin = 12;
+    const headerY = margin;
+    const drawingTop = headerY + 6;
+    const usableWidth = pageWidth - margin * 2;
+    const usableHeight = pageHeight - drawingTop - margin;
+    const deckWidth = Math.max(safeBounds.width, 0.5);
+    const deckHeight = Math.max(safeBounds.height, 0.5);
+    const scale = Math.min(usableWidth / deckWidth, usableHeight / deckHeight);
+    const offsetX = margin;
+    const offsetY = drawingTop;
+
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42);
+    doc.text(deckName, margin, headerY);
+
+    if (!entries.length) {
+        doc.setFontSize(12);
+        doc.text('No layout data for this deck yet.', margin, headerY + 8);
+        return;
+    }
+
+    entries.forEach((entry) => {
+        const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
+        const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
+        const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
+        const heightMeters = Number(entry.height) || DEFAULT_ITEM_HEIGHT_METERS;
+        const x = offsetX + (xMeters - safeBounds.minX) * scale;
+        const y = offsetY + (yMeters - safeBounds.minY) * scale;
+        const width = widthMeters * scale;
+        const height = heightMeters * scale;
+        const label = entry.label || (entry.type === 'deck-area' ? 'Deck area' : 'Item');
+        if (entry.type === 'deck-area') {
+            doc.setFillColor(241, 245, 249);
+            doc.setDrawColor(15, 23, 42);
+            doc.rect(x, y, width, height, 'FD');
+            doc.setFontSize(10);
+            doc.setTextColor(15, 23, 42);
+            const deckText = doc.splitTextToSize(label, Math.max(width - 2, 10));
+            doc.text(deckText, x + width / 2, y + height / 2, { align: 'center', baseline: 'middle' });
+        } else {
+            const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
+            doc.setFillColor(r, g, b);
+            doc.setDrawColor(15, 23, 42);
+            doc.rect(x, y, width, height, 'FD');
+            doc.setFontSize(9);
+            const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
+            doc.setTextColor(textColor, textColor, textColor);
+            const itemText = doc.splitTextToSize(label, Math.max(width - 2, 8));
+            doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
+        }
+    });
+
+    const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
+    drawDeckAreaConnections(doc, deckAreas, safeBounds, scale, offsetX, offsetY);
+}
+
+function renderItemsSummaryTable(doc, rows, shouldStartOnNewPage) {
+    const tableRows = Array.isArray(rows) ? rows : [];
+    if (shouldStartOnNewPage) {
+        doc.addPage('a4', 'portrait');
+    }
+    const orientation = 'portrait';
+    const { width: pageWidth, height: pageHeight } = getA4Dimensions(orientation);
+    const margin = 12;
+    const tableWidth = pageWidth - margin * 2;
+    const itemWidth = 38;
+    const locationWidth = 58;
+    const lastModifiedWidth = 32;
+    const commentWidth = Math.max(tableWidth - itemWidth - locationWidth - lastModifiedWidth, 40);
+    const headerHeight = 8;
+    let cursorY = margin;
+
+    const drawHeader = (title) => {
+        doc.setFontSize(16);
+        doc.setTextColor(15, 23, 42);
+        doc.text(title, margin, cursorY);
+        cursorY += 4;
+        doc.setFillColor(226, 232, 240);
+        doc.rect(margin, cursorY, tableWidth, headerHeight, 'F');
+        doc.setFontSize(10);
+        doc.setTextColor(15, 23, 42);
+        doc.text('Item', margin + 2, cursorY + 5);
+        doc.text('Location', margin + itemWidth + 2, cursorY + 5);
+        doc.text('Last modified', margin + itemWidth + locationWidth + 2, cursorY + 5);
+        doc.text('Comment', margin + itemWidth + locationWidth + lastModifiedWidth + 2, cursorY + 5);
+        cursorY += headerHeight + 2;
+    };
+
+    drawHeader('Item summary');
+
+    if (!tableRows.length) {
+        doc.setFontSize(11);
+        doc.setTextColor(100, 116, 139);
+        doc.text('No items available yet.', margin, cursorY + 6);
+        return;
+    }
+
+    tableRows.forEach((row, index) => {
+        const itemText = doc.splitTextToSize(row.itemLabel, itemWidth - 2);
+        const locationText = doc.splitTextToSize(row.locationLabel, locationWidth - 2);
+        const commentText = doc.splitTextToSize(row.comment || '—', commentWidth - 2);
+        const rowLines = Math.max(itemText.length, locationText.length, commentText.length, 1);
+        const rowHeight = rowLines * 5 + 2;
+        if (cursorY + rowHeight > pageHeight - margin) {
+            doc.addPage('a4', 'portrait');
+            cursorY = margin;
+            drawHeader('Item summary (cont.)');
+        }
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+        doc.text(itemText, margin + 1, cursorY + 2, { baseline: 'top' });
+        doc.text(locationText, margin + itemWidth + 1, cursorY + 2, { baseline: 'top' });
+        doc.text(formatTableDate(row.lastModified) || '—', margin + itemWidth + locationWidth + 1, cursorY + 2, {
+            baseline: 'top',
+        });
+        doc.text(commentText, margin + itemWidth + locationWidth + lastModifiedWidth + 1, cursorY + 2, {
+            baseline: 'top',
+        });
+        cursorY += rowHeight;
+        if (index < tableRows.length - 1) {
+            doc.setDrawColor(226, 232, 240);
+            doc.setLineWidth(0.2);
+            doc.line(margin, cursorY, margin + tableWidth, cursorY);
+        }
     });
 }
 
@@ -3954,6 +4353,13 @@ if (deckAddAreaButton) {
     deckAddAreaButton.addEventListener('click', (event) => {
         event.stopPropagation();
         handleAddDeckArea();
+    });
+}
+
+if (printToPdfButton) {
+    printToPdfButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handlePrintToPdf();
     });
 }
 
