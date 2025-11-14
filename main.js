@@ -572,7 +572,7 @@ async function handlePrintToPdf() {
         });
 
         const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
-        const deckAreaGroups = groupDeckAreasForPrint(deckAreas);
+        const deckAreaGroups = sortDeckAreaGroupsAlphabetically(groupDeckAreasForPrint(deckAreas));
         deckAreaGroups.forEach((group) => {
             const groupEntries = buildDeckAreaGroupEntries(group, entries);
             if (!groupEntries.length) {
@@ -1838,6 +1838,40 @@ function buildDeckAreaGroupTitle(deckName, deckAreas) {
     return `${deckLabel} – ${labels.join(' + ')}`;
 }
 
+function sortDeckAreaGroupsAlphabetically(groups) {
+    if (!Array.isArray(groups) || !groups.length) {
+        return [];
+    }
+    const collator = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
+    const normalizeLabel = (value) =>
+        typeof value === 'string' && value.trim() ? value.trim() : 'Deck area';
+    const getGroupKey = (group) => {
+        if (!Array.isArray(group) || !group.length) {
+            return 'Deck area';
+        }
+        const labels = group
+            .map((area) => normalizeLabel(area?.label))
+            .filter((label) => !!label)
+            .sort((a, b) => {
+                if (collator) {
+                    return collator.compare(a, b);
+                }
+                return a.localeCompare(b);
+            });
+        return labels.join(' | ') || 'Deck area';
+    };
+    return groups
+        .slice()
+        .sort((a, b) => {
+            const keyA = getGroupKey(a);
+            const keyB = getGroupKey(b);
+            if (collator) {
+                return collator.compare(keyA, keyB);
+            }
+            return keyA.localeCompare(keyB);
+        });
+}
+
 function sortEntriesForPdf(entries) {
     if (!Array.isArray(entries)) {
         return [];
@@ -2032,8 +2066,11 @@ function renderDeckOnPdf(
             };
             if (hasRotation) {
                 deckTextOptions.angle = rotationDegrees;
+                const deckTextContent = deckTextLayout.lines.join('\n');
+                doc.text(deckTextContent, centerX, centerY, deckTextOptions);
+            } else {
+                doc.text(deckTextLayout.lines, centerX, centerY, deckTextOptions);
             }
-            doc.text(deckTextLayout.lines, x + width / 2, y + height / 2, deckTextOptions);
         } else {
             const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
             doc.setFillColor(r, g, b);
@@ -2050,7 +2087,7 @@ function renderDeckOnPdf(
                 doc.setFontSize(itemTextLayout.fontSize);
                 const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
                 if (hasRotation) {
-                    doc.text(itemText, centerX, centerY, {
+                    doc.text(itemText.join('\n'), centerX, centerY, {
                         align: 'center',
                         baseline: 'middle',
                         angle: rotationDegrees,
