@@ -1946,6 +1946,34 @@ function drawRotatedRect(doc, x, y, width, height, rotationDegrees, style = 'S')
     doc.lines(segments, corners[0].x, corners[0].y, [1, 1], style, true);
 }
 
+function drawCenteredTextBlock(doc, lines, centerX, centerY, { angle = 0, lineHeight = 1.2 } = {}) {
+    if (!doc || typeof doc.text !== 'function') {
+        return;
+    }
+    const safeLines = Array.isArray(lines) ? lines.filter((line) => typeof line === 'string') : [];
+    if (!safeLines.length) {
+        return;
+    }
+    const safeLineHeight = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 1.2;
+    const currentFontSize = typeof doc.getFontSize === 'function' ? doc.getFontSize() : 10;
+    const lineSpacing = currentFontSize * safeLineHeight;
+    const normalizedAngle = normalizeRotationDegrees(angle);
+    const radians = degreesToRadians(normalizedAngle);
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const halfSpan = (safeLines.length - 1) / 2;
+    safeLines.forEach((line, index) => {
+        const offsetFromCenter = (index - halfSpan) * lineSpacing;
+        const rotatedX = centerX - offsetFromCenter * sin;
+        const rotatedY = centerY + offsetFromCenter * cos;
+        const textOptions = { align: 'center', baseline: 'middle' };
+        if (Math.abs(normalizedAngle) > 0.01) {
+            textOptions.angle = normalizedAngle;
+        }
+        doc.text(line, rotatedX, rotatedY, textOptions);
+    });
+}
+
 function fitTextWithinRect(doc, text, width, height, { maxFontSize = 10, minFontSize = 6, lineHeight = 1.2 } = {}) {
     const safeText = typeof text === 'string' ? text.trim() : '';
     const safeLineHeight = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 1.2;
@@ -2060,17 +2088,11 @@ function renderDeckOnPdf(
                 minFontSize: 6,
             });
             doc.setFontSize(deckTextLayout.fontSize);
-            const deckTextOptions = {
-                align: 'center',
-                baseline: 'middle',
-            };
-            if (hasRotation) {
-                deckTextOptions.angle = rotationDegrees;
-                const deckTextContent = deckTextLayout.lines.join('\n');
-                doc.text(deckTextContent, centerX, centerY, deckTextOptions);
-            } else {
-                doc.text(deckTextLayout.lines, centerX, centerY, deckTextOptions);
-            }
+            const deckTextLines = deckTextLayout.lines.length ? deckTextLayout.lines : [''];
+            drawCenteredTextBlock(doc, deckTextLines, centerX, centerY, {
+                angle: rotationDegrees,
+                lineHeight: deckTextLayout.lineHeight,
+            });
         } else {
             const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
             doc.setFillColor(r, g, b);
@@ -2087,10 +2109,9 @@ function renderDeckOnPdf(
                 doc.setFontSize(itemTextLayout.fontSize);
                 const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
                 if (hasRotation) {
-                    doc.text(itemText.join('\n'), centerX, centerY, {
-                        align: 'center',
-                        baseline: 'middle',
+                    drawCenteredTextBlock(doc, itemText, centerX, centerY, {
                         angle: rotationDegrees,
+                        lineHeight: itemTextLayout.lineHeight,
                     });
                 } else {
                     doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
