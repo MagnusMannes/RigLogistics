@@ -557,10 +557,18 @@ async function handlePrintToPdf() {
         const deckBounds = getDeckBounds(entries);
         const firstOrientation = determineDeckPageOrientation(deckBounds);
         const doc = new jsPdfConstructor({ orientation: firstOrientation, unit: 'mm', format: 'a4' });
+        const bannerTimestamp = formatDeckBannerTimestamp(new Date());
+        const bannerHeight = drawDeckPdfBanner(doc, {
+            deckName: currentDeck?.name,
+            timestamp: bannerTimestamp,
+            orientation: firstOrientation,
+        });
         renderDeckOnPdf(doc, currentDeck, entries, {
             bounds: deckBounds,
             orientation: firstOrientation,
             hideItemLabels: true,
+            topOffset: bannerHeight,
+            suppressPageTitle: true,
         });
 
         const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
@@ -1925,14 +1933,51 @@ function fitTextWithinRect(doc, text, width, height, { maxFontSize = 10, minFont
     return { lines, fontSize: minFontSize };
 }
 
-function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title, hideItemLabels = false } = {}) {
+const PDF_FIRST_PAGE_BANNER_HEIGHT = 14;
+
+function formatDeckBannerTimestamp(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, '0');
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function drawDeckPdfBanner(doc, { deckName, timestamp, orientation } = {}) {
+    const safeDeckName = typeof deckName === 'string' && deckName.trim() ? deckName.trim() : 'Deck';
+    const safeTimestamp = typeof timestamp === 'string' && timestamp.trim() ? timestamp.trim() : formatDeckBannerTimestamp();
+    const pageOrientation = orientation || 'portrait';
+    const { width: pageWidth } = getA4Dimensions(pageOrientation);
+    const bannerHeight = PDF_FIRST_PAGE_BANNER_HEIGHT;
+    doc.setFillColor(37, 99, 235);
+    doc.rect(0, 0, pageWidth, bannerHeight, 'F');
+    const margin = 12;
+    const centerY = bannerHeight / 2;
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text(safeDeckName, margin, centerY, { baseline: 'middle' });
+    doc.setFontSize(11);
+    doc.text(safeTimestamp, pageWidth - margin, centerY, { align: 'right', baseline: 'middle' });
+    return bannerHeight;
+}
+
+function renderDeckOnPdf(
+    doc,
+    deck,
+    entries,
+    { bounds, orientation, title, hideItemLabels = false, topOffset = 0, suppressPageTitle = false } = {}
+) {
     const deckName = deck?.name || 'Deck';
     const safeBounds = bounds || getDeckBounds(entries);
     const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
     const { width: pageWidth, height: pageHeight } = getA4Dimensions(pageOrientation);
     const margin = 12;
-    const headerY = margin;
-    const drawingTop = headerY + 6;
+    const safeTopOffset = Number.isFinite(topOffset) ? Math.max(topOffset, 0) : 0;
+    const headerY = margin + safeTopOffset;
+    const headerHeight = suppressPageTitle ? 0 : 6;
+    const drawingTop = headerY + headerHeight;
     const usableWidth = pageWidth - margin * 2;
     const usableHeight = pageHeight - drawingTop - margin;
     const deckWidth = Math.max(safeBounds.width, 0.5);
@@ -1942,9 +1987,11 @@ function renderDeckOnPdf(doc, deck, entries, { bounds, orientation, title, hideI
     const offsetY = drawingTop;
 
     const pageTitle = typeof title === 'string' && title.trim() ? title.trim() : deckName;
-    doc.setFontSize(16);
-    doc.setTextColor(15, 23, 42);
-    doc.text(pageTitle, margin, headerY);
+    if (!suppressPageTitle) {
+        doc.setFontSize(16);
+        doc.setTextColor(15, 23, 42);
+        doc.text(pageTitle, margin, headerY);
+    }
 
     const sortedEntries = sortEntriesForPdf(entries);
 
