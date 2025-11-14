@@ -573,12 +573,7 @@ async function handlePrintToPdf() {
 
         const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
         const deckAreaGroups = groupDeckAreasForPrint(deckAreas);
-        const sortedDeckAreaGroups = deckAreaGroups.slice().sort((a, b) => {
-            const labelA = getDeckAreaGroupSortKey(a);
-            const labelB = getDeckAreaGroupSortKey(b);
-            return labelA.localeCompare(labelB, undefined, { sensitivity: 'base' });
-        });
-        sortedDeckAreaGroups.forEach((group) => {
+        deckAreaGroups.forEach((group) => {
             const groupEntries = buildDeckAreaGroupEntries(group, entries);
             if (!groupEntries.length) {
                 return;
@@ -1832,30 +1827,13 @@ function buildDeckAreaGroupBounds(entries, padding = 0.5) {
     };
 }
 
-function getDeckAreaLabel(area) {
-    if (!area) {
-        return 'Deck area';
-    }
-    const label = typeof area.label === 'string' ? area.label.trim() : '';
-    return label || 'Deck area';
-}
-
-function getDeckAreaGroupSortKey(deckAreas) {
-    if (!Array.isArray(deckAreas) || !deckAreas.length) {
-        return '';
-    }
-    const labels = deckAreas.map((area) => getDeckAreaLabel(area));
-    const uniqueLabels = labels.filter((value, index, array) => array.indexOf(value) === index);
-    return uniqueLabels[0]?.toLowerCase() || '';
-}
-
 function buildDeckAreaGroupTitle(deckName, deckAreas) {
     const deckLabel = deckName || 'Deck';
     if (!Array.isArray(deckAreas) || !deckAreas.length) {
         return deckLabel;
     }
     const labels = deckAreas
-        .map((area) => getDeckAreaLabel(area))
+        .map((area) => (typeof area.label === 'string' && area.label.trim() ? area.label.trim() : 'Deck area'))
         .filter((value, index, array) => array.indexOf(value) === index);
     return `${deckLabel} – ${labels.join(' + ')}`;
 }
@@ -1958,35 +1936,6 @@ function fitTextWithinRect(doc, text, width, height, { maxFontSize = 10, minFont
 
 const PDF_FIRST_PAGE_BANNER_HEIGHT = 14;
 
-function drawRotatedText(doc, textLines, centerX, centerY, rotationDegrees) {
-    const normalizedAngle = normalizeRotationDegrees(rotationDegrees);
-    const lines = Array.isArray(textLines) && textLines.length ? textLines : [''];
-    if (Math.abs(normalizedAngle) < 0.01) {
-        doc.text(lines, centerX, centerY, { align: 'center', baseline: 'middle' });
-        return;
-    }
-    if (typeof doc.saveGraphicsState === 'function' && typeof doc.restoreGraphicsState === 'function') {
-        doc.saveGraphicsState();
-        doc.rotate(normalizedAngle, { origin: [centerX, centerY] });
-        doc.text(lines, centerX, centerY, { align: 'center', baseline: 'middle' });
-        doc.restoreGraphicsState();
-        return;
-    }
-    doc.text(lines, centerX, centerY, { align: 'center', baseline: 'middle', angle: normalizedAngle });
-}
-
-function drawItemLabelOnPdf(doc, textLines, { x, y, width, height, rotationDegrees }) {
-    const hasRotation = Math.abs(normalizeRotationDegrees(rotationDegrees)) > 0.01;
-    const lines = Array.isArray(textLines) && textLines.length ? textLines : [''];
-    if (hasRotation) {
-        const centerX = x + width / 2;
-        const centerY = y + height / 2;
-        drawRotatedText(doc, lines, centerX, centerY, rotationDegrees);
-        return;
-    }
-    doc.text(lines, x + 1, y + 3, { baseline: 'top' });
-}
-
 function formatDeckBannerTimestamp(date = new Date()) {
     const pad = (value) => String(value).padStart(2, '0');
     const year = date.getFullYear();
@@ -2064,6 +2013,9 @@ function renderDeckOnPdf(
         const height = heightMeters * scale;
         const label = entry.label || (entry.type === 'deck-area' ? 'Deck area' : 'Item');
         const rotationDegrees = normalizeRotationDegrees(entry.rotation);
+        const hasRotation = Math.abs(rotationDegrees) > 0.01;
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
         if (entry.type === 'deck-area') {
             doc.setFillColor(241, 245, 249);
             doc.setDrawColor(15, 23, 42);
@@ -2074,7 +2026,14 @@ function renderDeckOnPdf(
                 minFontSize: 6,
             });
             doc.setFontSize(deckTextLayout.fontSize);
-            drawRotatedText(doc, deckTextLayout.lines, x + width / 2, y + height / 2, rotationDegrees);
+            const deckTextOptions = {
+                align: 'center',
+                baseline: 'middle',
+            };
+            if (hasRotation) {
+                deckTextOptions.angle = rotationDegrees;
+            }
+            doc.text(deckTextLayout.lines, x + width / 2, y + height / 2, deckTextOptions);
         } else {
             const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
             doc.setFillColor(r, g, b);
@@ -2089,13 +2048,16 @@ function renderDeckOnPdf(
                     lineHeight: 1.15,
                 });
                 doc.setFontSize(itemTextLayout.fontSize);
-                drawItemLabelOnPdf(doc, itemTextLayout.lines, {
-                    x,
-                    y,
-                    width,
-                    height,
-                    rotationDegrees,
-                });
+                const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
+                if (hasRotation) {
+                    doc.text(itemText, centerX, centerY, {
+                        align: 'center',
+                        baseline: 'middle',
+                        angle: rotationDegrees,
+                    });
+                } else {
+                    doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
+                }
             }
         }
     });
