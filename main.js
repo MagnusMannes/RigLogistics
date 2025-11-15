@@ -586,7 +586,6 @@ async function handlePrintToPdf() {
         renderDeckOnPdf(doc, currentDeck, entries, {
             bounds: deckBounds,
             orientation: firstOrientation,
-            hideItemLabels: true,
             topOffset: bannerHeight,
             suppressPageTitle: true,
         });
