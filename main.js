@@ -441,6 +441,14 @@ function persistCurrentPlanningJob() {
         return;
     }
     job.deck.items = serializePlanningEditingItems();
+    if (currentDeck) {
+        const updatedAt = Date.now();
+        currentDeck.updatedAt = updatedAt;
+        const target = decks.find((deck) => deck.id === currentDeck.id);
+        if (target) {
+            target.updatedAt = updatedAt;
+        }
+    }
     saveDecks();
     renderPlanningJobOverlay(job);
 }
