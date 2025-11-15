@@ -5,6 +5,7 @@ const STATE_SYNC_RETRY_INTERVAL_MS = 5000;
 const DEFAULT_MUTATION_TIMESTAMP = Date.now();
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
 const PENDING_OPS_STORAGE_KEY = 'riglogistics:pendingOps';
+const PLANNING_STATE_STORAGE_KEY = 'riglogistics:planningState';
 const PIXELS_PER_METER = 60;
 const BASE_SCALE = 0.4;
 const MIN_SCALE = BASE_SCALE * 0.25;
@@ -152,8 +153,8 @@ inputWidth.step = inputHeight.step = '0.1';
 let lastKnownVersion = Number(window.__INITIAL_STATE__?.version) || 0;
 let lastMutationTimestamp =
     Number(window.__INITIAL_STATE__?.mutationTimestamp) || DEFAULT_MUTATION_TIMESTAMP;
-let decks = loadDecks();
 let pendingOperations = loadPendingOperations();
+let decks = loadDecks({ pendingOperationsSnapshot: pendingOperations });
 let currentDeck = null;
 let history = [];
 let activeItem = null;
@@ -192,6 +193,8 @@ if (typeof window !== 'undefined') {
             queueStateSync({ immediate: true });
         }
     });
+    window.addEventListener('beforeunload', handlePlanningPreferencesUnload);
+    window.addEventListener('pagehide', handlePlanningPreferencesUnload);
 }
 
 if (pendingOperations.length) {
@@ -442,6 +445,114 @@ function persistCurrentPlanningJob() {
     renderPlanningJobOverlay(job);
 }
 
+function loadStoredPlanningPreferences() {
+    if (typeof localStorage === 'undefined') {
+        return {};
+    }
+    try {
+        const raw = localStorage.getItem(PLANNING_STATE_STORAGE_KEY);
+        if (!raw) {
+            return {};
+        }
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+        console.warn('Failed to load planning preferences', error);
+        return {};
+    }
+}
+
+function saveStoredPlanningPreferences(preferences) {
+    if (typeof localStorage === 'undefined') {
+        return;
+    }
+    try {
+        const hasEntries = preferences && Object.keys(preferences).length > 0;
+        if (!hasEntries) {
+            localStorage.removeItem(PLANNING_STATE_STORAGE_KEY);
+            return;
+        }
+        localStorage.setItem(PLANNING_STATE_STORAGE_KEY, JSON.stringify(preferences));
+    } catch (error) {
+        console.warn('Failed to persist planning preferences', error);
+    }
+}
+
+function persistPlanningPreferencesForCurrentDeck() {
+    if (!currentDeck || typeof currentDeck.id !== 'string') {
+        return;
+    }
+    const preferences = loadStoredPlanningPreferences();
+    preferences[currentDeck.id] = {
+        active: planningState.active,
+        showCurrentDeck: planningState.showCurrentDeck,
+        editingJobId: planningState.editingJobId,
+        activeJobIds: Array.from(planningState.activeJobIds),
+    };
+    saveStoredPlanningPreferences(preferences);
+}
+
+function clearPlanningPreferencesForDeck(deckId) {
+    if (!deckId) {
+        return;
+    }
+    const preferences = loadStoredPlanningPreferences();
+    if (!preferences[deckId]) {
+        return;
+    }
+    delete preferences[deckId];
+    saveStoredPlanningPreferences(preferences);
+}
+
+function restorePlanningPreferencesForDeck(deck) {
+    if (!deck || typeof deck.id !== 'string') {
+        planningState.active = false;
+        planningState.activeJobIds.clear();
+        planningState.showCurrentDeck = true;
+        planningState.lockCurrentDeck = false;
+        planningState.editingJobId = null;
+        return;
+    }
+    const preferences = loadStoredPlanningPreferences();
+    const stored = preferences[deck.id];
+    planningState.activeJobIds.clear();
+    planningState.lockCurrentDeck = false;
+    planningState.editingJobId = null;
+    planningState.showCurrentDeck = true;
+    planningState.active = false;
+    if (!stored) {
+        return;
+    }
+    const validJobIds = new Set(
+        Array.isArray(deck.jobs) ? deck.jobs.map((job) => job.id).filter(Boolean) : []
+    );
+    planningState.active = stored.active === true;
+    planningState.showCurrentDeck = stored.showCurrentDeck !== false;
+    if (Array.isArray(stored.activeJobIds)) {
+        stored.activeJobIds.forEach((jobId) => {
+            if (jobId && validJobIds.has(jobId)) {
+                planningState.activeJobIds.add(jobId);
+            }
+        });
+    }
+    if (typeof stored.editingJobId === 'string' && validJobIds.has(stored.editingJobId)) {
+        planningState.editingJobId = stored.editingJobId;
+        if (!planningState.activeJobIds.size) {
+            planningState.activeJobIds.add(stored.editingJobId);
+        }
+    }
+    if (!planningState.active) {
+        planningState.activeJobIds.clear();
+        planningState.editingJobId = null;
+        planningState.showCurrentDeck = true;
+    }
+}
+
+function handlePlanningPreferencesUnload() {
+    persistCurrentPlanningJob();
+    persistPlanningPreferencesForCurrentDeck();
+}
+
 function setPlanningEditingJob(jobId) {
     if (!planningState.active) {
         return;
@@ -455,6 +566,7 @@ function setPlanningEditingJob(jobId) {
             clearPlanningEditingLayer();
         }
         refreshItemList();
+        persistPlanningPreferencesForCurrentDeck();
         return;
     }
     persistCurrentPlanningJob();
@@ -462,16 +574,19 @@ function setPlanningEditingJob(jobId) {
     if (!normalizedId) {
         clearPlanningEditingLayer();
         refreshItemList();
+        persistPlanningPreferencesForCurrentDeck();
         return;
     }
     const job = getPlanningJob(normalizedId);
     if (!job) {
         clearPlanningEditingLayer();
         refreshItemList();
+        persistPlanningPreferencesForCurrentDeck();
         return;
     }
     loadPlanningJobForEditing(job);
     refreshItemList();
+    persistPlanningPreferencesForCurrentDeck();
 }
 
 function setDeckSettingsVisibility(visible) {
@@ -1168,6 +1283,7 @@ function enterPlanningMode() {
     clearPlanningEditingLayer();
     renderPlanningJobs();
     refreshItemList();
+    persistPlanningPreferencesForCurrentDeck();
     closeToolsMenu();
 }
 
@@ -1184,6 +1300,7 @@ function exitPlanningMode() {
     clearPlanningEditingLayer();
     renderPlanningJobs();
     refreshItemList();
+    persistPlanningPreferencesForCurrentDeck();
     closeToolsMenu();
 }
 
@@ -1313,6 +1430,7 @@ function renderPlanningJobs() {
         planningJobsList.appendChild(emptyMessage);
         updatePlanningControlsState();
         updatePlanningStateUI();
+        persistPlanningPreferencesForCurrentDeck();
         return;
     }
     if (planningActive) {
@@ -1369,6 +1487,7 @@ function renderPlanningJobs() {
     }
     updatePlanningControlsState();
     updatePlanningStateUI();
+    persistPlanningPreferencesForCurrentDeck();
 }
 
 function togglePlanningJob(jobId) {
@@ -1401,6 +1520,7 @@ function togglePlanningJob(jobId) {
     }
     renderPlanningJobs();
     refreshItemList();
+    persistPlanningPreferencesForCurrentDeck();
 }
 
 function handlePlanningCurrentDeckToggle() {
@@ -1415,6 +1535,7 @@ function handlePlanningCurrentDeckToggle() {
     }
     planningState.showCurrentDeck = !planningState.showCurrentDeck;
     updatePlanningStateUI();
+    persistPlanningPreferencesForCurrentDeck();
 }
 
 function deletePlanningJob(jobId) {
@@ -1436,6 +1557,7 @@ function deletePlanningJob(jobId) {
     saveDecks();
     renderPlanningJobs();
     refreshItemList();
+    persistPlanningPreferencesForCurrentDeck();
 }
 
 function serializeWorkspaceElements() {
@@ -2545,6 +2667,7 @@ function handleCreatePlanningJob() {
     setPlanningEditingJob(job.id);
     saveDecks();
     renderPlanningJobs();
+    persistPlanningPreferencesForCurrentDeck();
 }
 
 const workspaceState = {
@@ -3063,12 +3186,35 @@ function clearPendingOperationsThrough(version) {
         : null;
 }
 
-function loadDecks() {
+function loadDecks({ pendingOperationsSnapshot } = {}) {
+    const snapshot = Array.isArray(pendingOperationsSnapshot)
+        ? pendingOperationsSnapshot
+        : [];
+    if (snapshot.length) {
+        const latest = snapshot[snapshot.length - 1];
+        const pendingState = latest?.state;
+        if (pendingState && Array.isArray(pendingState.decks) && pendingState.decks.length) {
+            const derivedVersion = Number(pendingState.version ?? latest.version);
+            if (Number.isFinite(derivedVersion)) {
+                lastKnownVersion = derivedVersion;
+            }
+            const derivedTimestamp = Number(
+                pendingState.mutationTimestamp ?? latest.timestamp ?? Date.now()
+            );
+            if (Number.isFinite(derivedTimestamp) && derivedTimestamp > 0) {
+                lastMutationTimestamp = derivedTimestamp;
+            }
+            return pendingState.decks.map((entry) => normalizeDeckEntry(entry));
+        }
+    }
     const initialState = window.__INITIAL_STATE__;
     if (initialState && Array.isArray(initialState.decks) && initialState.decks.length) {
         const normalized = initialState.decks.map((entry) => normalizeDeckEntry(entry));
         if (Number.isFinite(Number(initialState.version))) {
             lastKnownVersion = Number(initialState.version);
+        }
+        if (Number.isFinite(Number(initialState.mutationTimestamp))) {
+            lastMutationTimestamp = Number(initialState.mutationTimestamp);
         }
         return normalized;
     }
@@ -3297,6 +3443,9 @@ function selectDeck(deck) {
     if (!selectedDeck) {
         return;
     }
+    if (currentDeck) {
+        persistPlanningPreferencesForCurrentDeck();
+    }
     setDeckModifyMode(false);
     closeDeckSettingsPanel();
     currentDeck = selectedDeck;
@@ -3329,11 +3478,15 @@ function selectDeck(deck) {
     workspaceState.translateX = 0;
     workspaceState.translateY = 0;
     applyWorkspaceTransform();
+    restorePlanningPreferencesForDeck(currentDeck);
     closeToolsMenu();
     renderPlanningJobs();
 }
 
 function goBackToSelection() {
+    if (currentDeck) {
+        persistPlanningPreferencesForCurrentDeck();
+    }
     currentDeck = null;
     deactivateMeasureMode();
     planningState.activeJobIds.clear();
@@ -4614,6 +4767,7 @@ function handleDeleteDeck() {
         return;
     }
     decks.splice(selectedIndex - 1, 1);
+    clearPlanningPreferencesForDeck(deckToRemove.id);
     saveDecks();
     renderDeckList();
     if (currentDeck && currentDeck.id === deckToRemove.id) {
