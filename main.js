@@ -2,6 +2,7 @@ const selectedDeckKey = 'riglogistics:selectedDeck';
 const API_STATE_ENDPOINT = '/api/state';
 const STATE_SYNC_DEBOUNCE_MS = 300;
 const STATE_SYNC_RETRY_INTERVAL_MS = 5000;
+const DEFAULT_MUTATION_TIMESTAMP = Date.now();
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
 const PENDING_OPS_STORAGE_KEY = 'riglogistics:pendingOps';
 const PIXELS_PER_METER = 60;
@@ -144,6 +145,8 @@ inputWidth.min = inputHeight.min = MIN_ITEM_SIZE_METERS.toString();
 inputWidth.step = inputHeight.step = '0.1';
 
 let lastKnownVersion = Number(window.__INITIAL_STATE__?.version) || 0;
+let lastMutationTimestamp =
+    Number(window.__INITIAL_STATE__?.mutationTimestamp) || DEFAULT_MUTATION_TIMESTAMP;
 let decks = loadDecks();
 let pendingOperations = loadPendingOperations();
 let currentDeck = null;
@@ -2913,8 +2916,10 @@ function enqueuePendingOperation() {
     }
     const nextVersion = getLatestPendingVersion() + 1;
     const timestamp = Date.now();
+    lastMutationTimestamp = timestamp;
     const payload = getSerializableState();
     payload.version = nextVersion;
+    payload.mutationTimestamp = lastMutationTimestamp;
     const entry = {
         version: nextVersion,
         timestamp,
@@ -2962,6 +2967,7 @@ function getSerializableState() {
     return {
         version: lastKnownVersion,
         decks: Array.isArray(decks) ? decks.map((deck) => deckToSerializable(deck)) : [],
+        mutationTimestamp: lastMutationTimestamp,
     };
 }
 
@@ -3073,6 +3079,14 @@ function applyStateFromServer(nextState, { replaceWorkspace = true, force = fals
         return;
     }
     const nextVersion = Number(nextState.version) || 0;
+    if (
+        !force &&
+        nextVersion &&
+        pendingStateVersion !== null &&
+        Number(nextVersion) < Number(pendingStateVersion)
+    ) {
+        return;
+    }
     if (!force && nextVersion && nextVersion <= lastKnownVersion) {
         return;
     }
@@ -3082,6 +3096,10 @@ function applyStateFromServer(nextState, { replaceWorkspace = true, force = fals
     if (nextVersion) {
         lastKnownVersion = nextVersion;
         clearPendingOperationsThrough(nextVersion);
+    }
+    const incomingMutationTimestamp = Number(nextState.mutationTimestamp);
+    if (Number.isFinite(incomingMutationTimestamp) && incomingMutationTimestamp > 0) {
+        lastMutationTimestamp = incomingMutationTimestamp;
     }
     renderDeckList();
     if (previousDeckId) {
