@@ -321,7 +321,8 @@ function normalizeDeck(deck) {
       id: generateId('deck'),
       name: name && name.trim() ? name.trim() : 'Deck',
       layout: [],
-      jobs: []
+      jobs: [],
+      updatedAt: Date.now()
     };
   }
   const id = typeof deck.id === 'string' && deck.id.trim() ? deck.id.trim() : generateId('deck');
@@ -330,18 +331,59 @@ function normalizeDeck(deck) {
   const layout = layoutSource.map((entry) => normalizeLayoutEntry(entry)).filter(Boolean);
   const jobsSource = Array.isArray(deck.jobs) ? deck.jobs : [];
   const jobs = jobsSource.map((job) => normalizePlanningJob(job));
-  return { id, name, layout, jobs };
+  const updatedAtValue = Number(deck.updatedAt);
+  const updatedAt = Number.isFinite(updatedAtValue) && updatedAtValue > 0 ? updatedAtValue : Date.now();
+  return { id, name, layout, jobs, updatedAt };
 }
 
-function normalizeState(raw) {
+function normalizeState(raw, { fallbackToDefaults = true } = {}) {
   const decksSource = Array.isArray(raw?.decks) ? raw.decks : [];
-  let decks = decksSource.length ? decksSource : DEFAULT_DECK_NAMES.map((name) => ({ name }));
+  let decks = decksSource.length
+    ? decksSource
+    : fallbackToDefaults
+      ? DEFAULT_DECK_NAMES.map((name) => ({ name }))
+      : [];
   decks = decks.map((deck) => normalizeDeck(deck));
   const version = Number.isFinite(Number(raw?.version)) ? Number(raw.version) : (state.version || 0) + 1;
   const mutationTimestamp = Number.isFinite(Number(raw?.mutationTimestamp))
     ? Number(raw.mutationTimestamp)
     : Date.now();
   return { version, decks, mutationTimestamp };
+}
+
+function getDeckTimestamp(deck) {
+  const value = Number(deck?.updatedAt);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function mergeDeckCollections(currentDecks = [], incomingDecks = []) {
+  const incomingMap = new Map();
+  for (const deck of incomingDecks) {
+    if (deck?.id) {
+      incomingMap.set(deck.id, deck);
+    }
+  }
+  const merged = [];
+  let changed = false;
+  for (const deck of currentDecks) {
+    const incoming = deck?.id ? incomingMap.get(deck.id) : undefined;
+    if (incoming) {
+      if (getDeckTimestamp(incoming) > getDeckTimestamp(deck)) {
+        merged.push(incoming);
+        changed = true;
+      } else {
+        merged.push(deck);
+      }
+      incomingMap.delete(deck.id);
+    } else if (deck) {
+      merged.push(deck);
+    }
+  }
+  if (incomingMap.size) {
+    changed = true;
+    merged.push(...incomingMap.values());
+  }
+  return { decks: merged, changed };
 }
 
 async function ensureDataDir() {
@@ -381,20 +423,24 @@ app.get('/api/state', (req, res) => {
 
 app.post('/api/state', async (req, res) => {
   try {
-    const normalized = normalizeState(req.body || {});
-    const incomingTimestamp = Number.isFinite(Number(normalized?.mutationTimestamp))
-      ? Number(normalized.mutationTimestamp)
-      : Date.now();
-    const currentTimestamp = Number.isFinite(Number(state?.mutationTimestamp))
-      ? Number(state.mutationTimestamp)
-      : 0;
-    if (incomingTimestamp <= currentTimestamp) {
+    const normalized = normalizeState(req.body || {}, { fallbackToDefaults: false });
+    const { decks: mergedDecks, changed } = mergeDeckCollections(state.decks, normalized.decks);
+    if (!changed) {
       res.json(state);
       return;
     }
-    normalized.version = (state.version || 0) + 1;
-    normalized.mutationTimestamp = incomingTimestamp;
-    state = normalized;
+    const incomingTimestamp = Number.isFinite(Number(normalized?.mutationTimestamp))
+      ? Number(normalized.mutationTimestamp)
+      : 0;
+    const currentTimestamp = Number.isFinite(Number(state?.mutationTimestamp))
+      ? Number(state.mutationTimestamp)
+      : 0;
+    const nextMutationTimestamp = Math.max(Date.now(), currentTimestamp, incomingTimestamp);
+    state = {
+      version: (state.version || 0) + 1,
+      decks: mergedDecks,
+      mutationTimestamp: nextMutationTimestamp
+    };
     await persistState();
     io.emit('state:update', state);
     res.json(state);
