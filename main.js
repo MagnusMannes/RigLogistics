@@ -1,7 +1,9 @@
 const selectedDeckKey = 'riglogistics:selectedDeck';
 const API_STATE_ENDPOINT = '/api/state';
 const STATE_SYNC_DEBOUNCE_MS = 300;
+const STATE_SYNC_RETRY_INTERVAL_MS = 5000;
 const defaultDecks = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
+const PENDING_OPS_STORAGE_KEY = 'riglogistics:pendingOps';
 const PIXELS_PER_METER = 60;
 const BASE_SCALE = 0.4;
 const MIN_SCALE = BASE_SCALE * 0.25;
@@ -143,6 +145,7 @@ inputWidth.step = inputHeight.step = '0.1';
 
 let lastKnownVersion = Number(window.__INITIAL_STATE__?.version) || 0;
 let decks = loadDecks();
+let pendingOperations = loadPendingOperations();
 let currentDeck = null;
 let history = [];
 let activeItem = null;
@@ -170,8 +173,22 @@ let workspaceSaveTimer = null;
 let isApplyingRemoteState = false;
 let isLoadingWorkspace = false;
 let socket = null;
-let pendingStateVersion = null;
+let pendingStateVersion = pendingOperations.length
+    ? pendingOperations[pendingOperations.length - 1].version
+    : null;
 let jsPdfLoaderPromise = null;
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+        if (pendingOperations.length) {
+            queueStateSync({ immediate: true });
+        }
+    });
+}
+
+if (pendingOperations.length) {
+    setTimeout(() => queueStateSync({ immediate: true }), 0);
+}
 
 function normalizeItemShape(shape) {
     if (typeof shape !== 'string') {
@@ -2838,6 +2855,92 @@ function refreshItemList() {
     });
 }
 
+function loadPendingOperations() {
+    try {
+        const raw = localStorage.getItem(PENDING_OPS_STORAGE_KEY);
+        if (!raw) {
+            return [];
+        }
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((entry) => ({
+                version: Number(entry?.version) || 0,
+                timestamp: Number(entry?.timestamp) || Date.now(),
+                state: entry?.state && typeof entry.state === 'object' ? entry.state : null,
+            }))
+            .filter((entry) => entry.version > 0 && entry.state && Array.isArray(entry.state.decks));
+    } catch (error) {
+        console.warn('Failed to load pending deck operations', error);
+        return [];
+    }
+}
+
+function persistPendingOperations() {
+    try {
+        if (!pendingOperations.length) {
+            localStorage.removeItem(PENDING_OPS_STORAGE_KEY);
+            return;
+        }
+        localStorage.setItem(
+            PENDING_OPS_STORAGE_KEY,
+            JSON.stringify(
+                pendingOperations.map((entry) => ({
+                    version: entry.version,
+                    timestamp: entry.timestamp,
+                    state: entry.state,
+                }))
+            )
+        );
+    } catch (error) {
+        console.warn('Failed to persist pending deck operations', error);
+    }
+}
+
+function getLatestPendingVersion() {
+    if (!pendingOperations.length) {
+        return lastKnownVersion || 0;
+    }
+    const lastEntry = pendingOperations[pendingOperations.length - 1];
+    return Number(lastEntry?.version) || lastKnownVersion || 0;
+}
+
+function enqueuePendingOperation() {
+    if (!Array.isArray(decks) || !decks.length) {
+        return;
+    }
+    const nextVersion = getLatestPendingVersion() + 1;
+    const timestamp = Date.now();
+    const payload = getSerializableState();
+    payload.version = nextVersion;
+    const entry = {
+        version: nextVersion,
+        timestamp,
+        state: payload,
+    };
+    pendingOperations.push(entry);
+    pendingStateVersion = entry.version;
+    persistPendingOperations();
+}
+
+function clearPendingOperationsThrough(version) {
+    if (!Number.isFinite(version)) {
+        return;
+    }
+    const targetVersion = Number(version);
+    const nextQueue = pendingOperations.filter((entry) => Number(entry.version) > targetVersion);
+    const didChange = nextQueue.length !== pendingOperations.length;
+    pendingOperations = nextQueue;
+    if (didChange) {
+        persistPendingOperations();
+    }
+    pendingStateVersion = pendingOperations.length
+        ? pendingOperations[pendingOperations.length - 1].version
+        : null;
+}
+
 function loadDecks() {
     const initialState = window.__INITIAL_STATE__;
     if (initialState && Array.isArray(initialState.decks) && initialState.decks.length) {
@@ -2851,6 +2954,7 @@ function loadDecks() {
 }
 
 function saveDecks() {
+    enqueuePendingOperation();
     queueStateSync();
 }
 
@@ -2863,6 +2967,9 @@ function getSerializableState() {
 
 function queueStateSync({ immediate = false } = {}) {
     if (isApplyingRemoteState) {
+        return;
+    }
+    if (!pendingOperations.length) {
         return;
     }
     if (immediate) {
@@ -2882,17 +2989,32 @@ function queueStateSync({ immediate = false } = {}) {
     }, STATE_SYNC_DEBOUNCE_MS);
 }
 
+function scheduleStateSyncRetry() {
+    if (stateSyncTimer) {
+        return;
+    }
+    stateSyncTimer = setTimeout(() => {
+        stateSyncTimer = null;
+        syncStateWithServer();
+    }, STATE_SYNC_RETRY_INTERVAL_MS);
+}
+
 async function syncStateWithServer() {
     if (isApplyingRemoteState) {
         return;
     }
-    if (!Array.isArray(decks) || !decks.length) {
+    if (!pendingOperations.length) {
         return;
     }
-    const payload = getSerializableState();
-    const expectedNextVersion = (lastKnownVersion || 0) + 1;
-    if (pendingStateVersion === null || expectedNextVersion > pendingStateVersion) {
-        pendingStateVersion = expectedNextVersion;
+    const snapshot = pendingOperations[pendingOperations.length - 1];
+    const payload = snapshot?.state
+        ? {
+              version: snapshot.version,
+              decks: Array.isArray(snapshot.state.decks) ? snapshot.state.decks : [],
+          }
+        : null;
+    if (!payload) {
+        return;
     }
     try {
         const response = await fetch(API_STATE_ENDPOINT, {
@@ -2904,15 +3026,10 @@ async function syncStateWithServer() {
             throw new Error(`Request failed with status ${response.status}`);
         }
         const result = await response.json();
-        const nextVersion = Number(result?.version);
-        if (Number.isFinite(nextVersion)) {
-            pendingStateVersion = nextVersion;
-        }
         applyStateFromServer(result, { replaceWorkspace: false, force: true });
-        pendingStateVersion = null;
     } catch (error) {
         console.error('Failed to sync decks with server', error);
-        pendingStateVersion = null;
+        scheduleStateSyncRetry();
     }
 }
 
@@ -2926,6 +3043,7 @@ function performWorkspaceSave() {
     if (target) {
         target.layout = layout;
     }
+    enqueuePendingOperation();
     queueStateSync();
 }
 
@@ -2963,6 +3081,7 @@ function applyStateFromServer(nextState, { replaceWorkspace = true, force = fals
     decks = nextState.decks.map((entry) => normalizeDeckEntry(entry));
     if (nextVersion) {
         lastKnownVersion = nextVersion;
+        clearPendingOperationsThrough(nextVersion);
     }
     renderDeckList();
     if (previousDeckId) {
