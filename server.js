@@ -144,7 +144,7 @@ const DEFAULT_STATE_PATH = path.join(DATA_DIR, 'default-state.json');
 
 const DEFAULT_DECK_NAMES = ['Statfjord A deck', 'Statfjord B deck', 'Statfjord C deck'];
 
-let state = { version: 1, decks: [] };
+let state = { version: 1, decks: [], mutationTimestamp: Date.now() };
 
 const ALLOWED_ITEM_SHAPES = new Set([
   'rectangle',
@@ -338,7 +338,10 @@ function normalizeState(raw) {
   let decks = decksSource.length ? decksSource : DEFAULT_DECK_NAMES.map((name) => ({ name }));
   decks = decks.map((deck) => normalizeDeck(deck));
   const version = Number.isFinite(Number(raw?.version)) ? Number(raw.version) : (state.version || 0) + 1;
-  return { version, decks };
+  const mutationTimestamp = Number.isFinite(Number(raw?.mutationTimestamp))
+    ? Number(raw.mutationTimestamp)
+    : Date.now();
+  return { version, decks, mutationTimestamp };
 }
 
 async function ensureDataDir() {
@@ -379,7 +382,18 @@ app.get('/api/state', (req, res) => {
 app.post('/api/state', async (req, res) => {
   try {
     const normalized = normalizeState(req.body || {});
+    const incomingTimestamp = Number.isFinite(Number(normalized?.mutationTimestamp))
+      ? Number(normalized.mutationTimestamp)
+      : Date.now();
+    const currentTimestamp = Number.isFinite(Number(state?.mutationTimestamp))
+      ? Number(state.mutationTimestamp)
+      : 0;
+    if (incomingTimestamp <= currentTimestamp) {
+      res.json(state);
+      return;
+    }
     normalized.version = (state.version || 0) + 1;
+    normalized.mutationTimestamp = incomingTimestamp;
     state = normalized;
     await persistState();
     io.emit('state:update', state);
