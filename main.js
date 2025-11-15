@@ -12,6 +12,11 @@ const MIN_ITEM_SIZE_METERS = 0.5;
 const DEFAULT_ITEM_WIDTH_METERS = 5;
 const DEFAULT_ITEM_HEIGHT_METERS = 3;
 const DEFAULT_DECK_AREA_SIZE_METERS = Number((320 / PIXELS_PER_METER).toFixed(2));
+const WORKSPACE_ITEM_FONT_SIZE_PX = 32; // Matches 2rem item font size from styles.css
+const WORKSPACE_ITEM_LABEL_PADDING_PX = 8; // Matches 0.5rem padding
+const WORKSPACE_ITEM_LINE_HEIGHT = 1.2;
+const MM_PER_POINT = 25.4 / 72;
+const FALLBACK_ITEM_FONT_SIZE_PT = 10;
 const LONG_PRESS_DURATION_MS = 550;
 const LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 
@@ -2064,13 +2069,27 @@ function getItemLabelBounds(width, height, shape) {
     return { width: baseWidth, height: baseHeight };
 }
 
-function buildItemLabelLayout(doc, label, width, height, shape) {
+function buildItemLabelLayout(doc, label, width, height, shape, scale) {
     const bounds = getItemLabelBounds(width, height, shape);
-    return fitTextWithinRect(doc, label, bounds.width, bounds.height, {
-        maxFontSize: 9,
-        minFontSize: 5,
-        lineHeight: 1.15,
-    });
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : null;
+    const mmPerWorkspacePixel = safeScale ? safeScale / PIXELS_PER_METER : null;
+    const computedFontSizePt = mmPerWorkspacePixel
+        ? (WORKSPACE_ITEM_FONT_SIZE_PX * mmPerWorkspacePixel) / MM_PER_POINT
+        : FALLBACK_ITEM_FONT_SIZE_PT;
+    const fontSizePt = Math.max(computedFontSizePt, 4);
+    const paddingMm = mmPerWorkspacePixel
+        ? WORKSPACE_ITEM_LABEL_PADDING_PX * mmPerWorkspacePixel
+        : WORKSPACE_ITEM_LABEL_PADDING_PX * 0.25;
+    const availableWidth = Math.max(bounds.width - paddingMm * 2, bounds.width * 0.25, 2);
+    const availableHeight = Math.max(bounds.height - paddingMm * 2, fontSizePt * MM_PER_POINT);
+    const safeText = typeof label === 'string' ? label.trim() : '';
+    doc.setFontSize(fontSizePt);
+    const lines = safeText ? doc.splitTextToSize(safeText, availableWidth) : [];
+    const fontSizeMm = fontSizePt * MM_PER_POINT;
+    const lineHeightMm = fontSizeMm * WORKSPACE_ITEM_LINE_HEIGHT;
+    const maxLines = Math.max(Math.floor(availableHeight / lineHeightMm), 1);
+    const trimmedLines = lines.slice(0, maxLines);
+    return { lines: trimmedLines, fontSize: fontSizePt, lineHeight: WORKSPACE_ITEM_LINE_HEIGHT };
 }
 
 function fitTextWithinRect(doc, text, width, height, { maxFontSize = 10, minFontSize = 6, lineHeight = 1.2 } = {}) {
@@ -2178,6 +2197,7 @@ function renderDeckOnPdf(
         const centerX = x + width / 2;
         const centerY = y + height / 2;
         if (entry.type === 'deck-area') {
+            doc.setFont('helvetica', 'normal');
             doc.setFillColor(241, 245, 249);
             doc.setDrawColor(15, 23, 42);
             drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
@@ -2202,9 +2222,10 @@ function renderDeckOnPdf(
             doc.setDrawColor(15, 23, 42);
             drawItemShape(doc, entry.shape, x, y, width, height, rotationDegrees, 'FD');
             if (!hideItemLabels) {
+                doc.setFont('helvetica', 'bold');
                 const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
                 doc.setTextColor(textColor, textColor, textColor);
-                const itemTextLayout = buildItemLabelLayout(doc, label, width, height, entry.shape);
+                const itemTextLayout = buildItemLabelLayout(doc, label, width, height, entry.shape, scale);
                 doc.setFontSize(itemTextLayout.fontSize);
                 const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
                 drawRotatedTextBlock(doc, itemText, centerX, centerY, rotationDegrees, {
