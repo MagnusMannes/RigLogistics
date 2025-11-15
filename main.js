@@ -1968,11 +1968,52 @@ function drawRotatedRect(doc, x, y, width, height, rotationDegrees, style = 'S')
         rotatePoint(x + width, y + height, centerX, centerY, radians),
         rotatePoint(x, y + height, centerX, centerY, radians),
     ];
-    const segments = corners.map((corner, index) => {
-        const next = corners[(index + 1) % corners.length];
-        return [next.x - corner.x, next.y - corner.y];
+    drawRotatedPolygon(doc, corners, centerX, centerY, 0, style);
+}
+
+function drawRotatedPolygon(doc, points, centerX, centerY, rotationDegrees, style = 'S') {
+    const normalized = normalizeRotationDegrees(rotationDegrees);
+    if (!Array.isArray(points) || points.length < 3) {
+        return;
+    }
+    const radians = Math.abs(normalized) < 0.01 ? 0 : degreesToRadians(normalized);
+    const rotatedPoints = radians
+        ? points.map((point) => rotatePoint(point.x, point.y, centerX, centerY, radians))
+        : points;
+    const segments = rotatedPoints.map((point, index) => {
+        const next = rotatedPoints[(index + 1) % rotatedPoints.length];
+        return [next.x - point.x, next.y - point.y];
     });
-    doc.lines(segments, corners[0].x, corners[0].y, [1, 1], style, true);
+    doc.lines(segments, rotatedPoints[0].x, rotatedPoints[0].y, [1, 1], style, true);
+}
+
+function drawItemShape(doc, shape, x, y, width, height, rotationDegrees, style = 'FD') {
+    const normalizedShape = normalizeItemShape(shape);
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    if (normalizedShape === 'circle') {
+        doc.ellipse(centerX, centerY, width / 2, height / 2, style);
+        return;
+    }
+    if (normalizedShape === 'triangle-right') {
+        const points = [
+            { x, y },
+            { x: x + width, y: y + height },
+            { x, y: y + height },
+        ];
+        drawRotatedPolygon(doc, points, centerX, centerY, rotationDegrees, style);
+        return;
+    }
+    if (normalizedShape === 'triangle-equilateral') {
+        const points = [
+            { x: x + width / 2, y },
+            { x, y: y + height },
+            { x: x + width, y: y + height },
+        ];
+        drawRotatedPolygon(doc, points, centerX, centerY, rotationDegrees, style);
+        return;
+    }
+    drawRotatedRect(doc, x, y, width, height, rotationDegrees, style);
 }
 
 function drawRotatedTextBlock(doc, lines, centerX, centerY, rotationDegrees, { fontSize, lineHeight } = {}) {
@@ -2001,6 +2042,34 @@ function drawRotatedTextBlock(doc, lines, centerX, centerY, rotationDegrees, { f
         const localY = -totalHeight / 2 + (index + 0.5) * lineSpacing;
         const { x, y } = rotatePoint(centerX + localX, centerY + localY, centerX, centerY, radians);
         doc.text(line, x, y, { baseline: 'middle' });
+    });
+}
+
+function getItemLabelBounds(width, height, shape) {
+    const padding = 4;
+    const baseWidth = Math.max(width - padding, 4);
+    const baseHeight = Math.max(height - padding, 4);
+    const normalizedShape = normalizeItemShape(shape);
+    if (normalizedShape === 'circle') {
+        const diameter = Math.min(baseWidth, baseHeight);
+        const squareSize = diameter / Math.sqrt(2);
+        return { width: squareSize, height: squareSize };
+    }
+    if (normalizedShape === 'triangle-right') {
+        return { width: baseWidth * 0.85, height: baseHeight * 0.6 };
+    }
+    if (normalizedShape === 'triangle-equilateral') {
+        return { width: baseWidth * 0.75, height: baseHeight * 0.55 };
+    }
+    return { width: baseWidth, height: baseHeight };
+}
+
+function buildItemLabelLayout(doc, label, width, height, shape) {
+    const bounds = getItemLabelBounds(width, height, shape);
+    return fitTextWithinRect(doc, label, bounds.width, bounds.height, {
+        maxFontSize: 9,
+        minFontSize: 5,
+        lineHeight: 1.15,
     });
 }
 
@@ -2131,25 +2200,17 @@ function renderDeckOnPdf(
             const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
             doc.setFillColor(r, g, b);
             doc.setDrawColor(15, 23, 42);
-            drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
+            drawItemShape(doc, entry.shape, x, y, width, height, rotationDegrees, 'FD');
             if (!hideItemLabels) {
                 const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
                 doc.setTextColor(textColor, textColor, textColor);
-                const itemTextLayout = fitTextWithinRect(doc, label, width, height, {
-                    maxFontSize: 9,
-                    minFontSize: 5,
-                    lineHeight: 1.15,
-                });
+                const itemTextLayout = buildItemLabelLayout(doc, label, width, height, entry.shape);
                 doc.setFontSize(itemTextLayout.fontSize);
                 const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
-                if (hasRotation) {
-                    drawRotatedTextBlock(doc, itemText, centerX, centerY, rotationDegrees, {
-                        fontSize: itemTextLayout.fontSize,
-                        lineHeight: itemTextLayout.lineHeight,
-                    });
-                } else {
-                    doc.text(itemText, x + 1, y + 3, { baseline: 'top' });
-                }
+                drawRotatedTextBlock(doc, itemText, centerX, centerY, rotationDegrees, {
+                    fontSize: itemTextLayout.fontSize,
+                    lineHeight: itemTextLayout.lineHeight,
+                });
             }
         }
     });
