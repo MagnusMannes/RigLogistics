@@ -827,7 +827,8 @@ function generatePlanningJobLabel(existingJobs = []) {
     return candidate;
 }
 
-function createDeckRecord(name, { id, jobs, layout } = {}) {
+function createDeckRecord(name, { id, jobs, layout, updatedAt } = {}) {
+    const timestamp = Number.isFinite(Number(updatedAt)) ? Number(updatedAt) : Date.now();
     return {
         id: typeof id === 'string' && id.trim() ? id : generateDeckId(),
         name: typeof name === 'string' && name.trim() ? name.trim() : 'Deck',
@@ -837,6 +838,7 @@ function createDeckRecord(name, { id, jobs, layout } = {}) {
                   .filter((value) => value !== null)
             : [],
         jobs: Array.isArray(jobs) ? jobs.map((job) => normalizePlanningJob(job)) : [],
+        updatedAt: timestamp,
     };
 }
 
@@ -898,7 +900,12 @@ function normalizeDeckEntry(entry) {
     if (!entry || typeof entry !== 'object') {
         return createDeckRecord('Deck');
     }
-    return createDeckRecord(entry.name, { id: entry.id, jobs: entry.jobs, layout: entry.layout });
+    return createDeckRecord(entry.name, {
+        id: entry.id,
+        jobs: entry.jobs,
+        layout: entry.layout,
+        updatedAt: entry.updatedAt,
+    });
 }
 
 function planningItemToSerializable(item) {
@@ -1040,6 +1047,7 @@ function jobToSerializable(job) {
 }
 
 function deckToSerializable(deck) {
+    const updatedAt = Number.isFinite(Number(deck?.updatedAt)) ? Number(deck.updatedAt) : Date.now();
     return {
         id: deck.id,
         name: deck.name,
@@ -1049,6 +1057,7 @@ function deckToSerializable(deck) {
                   .filter((value) => value !== null)
             : [],
         jobs: Array.isArray(deck.jobs) ? deck.jobs.map((job) => jobToSerializable(job)) : [],
+        updatedAt,
     };
 }
 
@@ -3071,9 +3080,12 @@ function performWorkspaceSave() {
     }
     const layout = serializeWorkspaceElements();
     currentDeck.layout = layout;
+    const updatedAt = Date.now();
+    currentDeck.updatedAt = updatedAt;
     const target = decks.find((deck) => deck.id === currentDeck.id);
     if (target) {
         target.layout = layout;
+        target.updatedAt = updatedAt;
     }
     enqueuePendingOperation();
     queueStateSync();
