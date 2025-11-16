@@ -2861,8 +2861,37 @@ function formatTimestamp(value) {
 
 function getItemLabel(element) {
     if (!element) return 'Unnamed item';
-    const label = (element.textContent || '').trim();
+    const labelElement = element.querySelector('.item-label');
+    const labelSource = labelElement ? labelElement.textContent : element.textContent;
+    const label = (labelSource || '').trim();
     return label || 'Unnamed item';
+}
+
+function ensureItemLabelElement(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return null;
+    }
+    let labelElement = element.querySelector('.item-label');
+    if (labelElement) {
+        return labelElement;
+    }
+    labelElement = document.createElement('div');
+    labelElement.className = 'item-label';
+    const existingHandle = element.querySelector('.resize-handle');
+    if (existingHandle) {
+        element.insertBefore(labelElement, existingHandle);
+    } else {
+        element.appendChild(labelElement);
+    }
+    return labelElement;
+}
+
+function setItemLabelText(element, text) {
+    const labelElement = ensureItemLabelElement(element);
+    if (!labelElement) {
+        return;
+    }
+    labelElement.textContent = text;
 }
 
 function getElementRect(element) {
@@ -3651,7 +3680,7 @@ function createItemElement(
     element.dataset.y = initialY.toFixed(2);
     if (type === 'item') {
         element.style.background = color;
-        element.textContent = label || 'New item';
+        setItemLabelText(element, label || 'New item');
         applyItemShapeStyles(element, shape);
         element.dataset.deckLayer = deckLayer ? 'true' : 'false';
         applyItemDeckLayerStyles(element);
@@ -3678,7 +3707,7 @@ function createItemElement(
     resizeHandle.className = 'resize-handle';
     element.appendChild(resizeHandle);
 
-    setupItemInteractions(element, resizeHandle);
+    setupItemInteractions(element);
     const creationMessage = `${type === 'item' ? 'Item' : 'Deck'} created${label ? `: ${label}` : ''}`;
     if (type === 'deck-area') {
         if (container === workspaceContent) {
@@ -3698,7 +3727,7 @@ function createItemElement(
     return element;
 }
 
-function setupItemInteractions(element, resizeHandle) {
+function setupItemInteractions(element) {
     let pointerId = null;
     let action = null;
     let start = {};
@@ -3761,9 +3790,13 @@ function setupItemInteractions(element, resizeHandle) {
             event.preventDefault();
         }
 
-        if (!isDeckArea && event.target === resizeHandle) {
+        const handleTarget =
+            event.target instanceof Element ? event.target.closest('.resize-handle') : null;
+        const interactedWithHandle = handleTarget && handleTarget.parentElement === element;
+
+        if (!isDeckArea && interactedWithHandle) {
             action = 'rotate';
-        } else if (event.target === resizeHandle) {
+        } else if (interactedWithHandle) {
             action = 'resize';
         } else {
             action = 'move';
@@ -3919,7 +3952,7 @@ function handleItemInteractionComplete(element, completedAction) {
 }
 
 function getItemHistoryLabel(element) {
-    const label = element.textContent.trim();
+    const label = getItemLabel(element);
     return label ? `: ${label}` : '';
 }
 
@@ -4235,7 +4268,7 @@ function openItemModifyDialog(element) {
     labelFieldset.appendChild(labelLegend);
     const labelInput = document.createElement('input');
     labelInput.type = 'text';
-    const currentLabel = element.textContent.trim();
+    const currentLabel = getItemLabel(element);
     labelInput.value = currentLabel === 'Unnamed item' ? '' : currentLabel;
     labelInput.placeholder = 'Item label';
     labelFieldset.appendChild(labelInput);
@@ -4444,10 +4477,10 @@ function applyItemModifications(element, { width, height, label, color }) {
 
     const trimmedLabel = label.trim();
     if (trimmedLabel && trimmedLabel !== previousLabel) {
-        element.textContent = trimmedLabel;
+        setItemLabelText(element, trimmedLabel);
         changes.push(`label "${trimmedLabel}"`);
     } else if (!trimmedLabel && previousLabel !== 'Unnamed item') {
-        element.textContent = 'Unnamed item';
+        setItemLabelText(element, 'Unnamed item');
         changes.push('label cleared');
     }
 

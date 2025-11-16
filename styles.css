@@ -890,6 +890,13 @@ button.icon-button {
     clip-path: none;
 }
 
+.item-label {
+    pointer-events: none;
+    width: 100%;
+    text-align: center;
+    line-height: 1.2;
+}
+
 .item:active {
     cursor: grabbing;
     box-shadow: 0 20px 45px rgba(15, 23, 42, 0.55);
