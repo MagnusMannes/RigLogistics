@@ -4029,7 +4029,6 @@ function promptItemComment(element) {
     const hadComment = Boolean(currentComment.trim());
     if (trimmed) {
         element.setAttribute('data-comment', trimmed);
-        element.setAttribute('title', trimmed);
         if (isPlanningItem(element)) {
             persistCurrentPlanningJob();
             return;
@@ -4039,7 +4038,6 @@ function promptItemComment(element) {
         updateItemRecord(element, message, { updateDeck: false, updateComment: true });
     } else {
         element.removeAttribute('data-comment');
-        element.removeAttribute('title');
         if (isPlanningItem(element)) {
             persistCurrentPlanningJob();
             return;
