@@ -18,6 +18,12 @@ const WORKSPACE_ITEM_LABEL_PADDING_PX = 8; // Matches 0.5rem padding
 const WORKSPACE_ITEM_LINE_HEIGHT = 1.2;
 const MM_PER_POINT = 25.4 / 72;
 const FALLBACK_ITEM_FONT_SIZE_PT = 10;
+const PDF_ITEM_LABEL_MIN_FONT_SIZE_PT = 6;
+const PDF_ITEM_LABEL_MAX_FONT_SIZE_PT = 18;
+const PDF_TABLE_BODY_FONT_SIZE_PT = 9;
+const PDF_TABLE_BODY_LINE_HEIGHT = 1.2;
+const PDF_TABLE_ROW_TOP_PADDING_MM = 2;
+const PDF_TABLE_ROW_BOTTOM_PADDING_MM = 1;
 const LONG_PRESS_DURATION_MS = 550;
 const LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 
@@ -2212,7 +2218,10 @@ function buildItemLabelLayout(doc, label, width, height, shape, scale) {
     const computedFontSizePt = mmPerWorkspacePixel
         ? (WORKSPACE_ITEM_FONT_SIZE_PX * mmPerWorkspacePixel) / MM_PER_POINT
         : FALLBACK_ITEM_FONT_SIZE_PT;
-    const fontSizePt = Math.max(computedFontSizePt, 4);
+    const fontSizePt = Math.min(
+        Math.max(computedFontSizePt, PDF_ITEM_LABEL_MIN_FONT_SIZE_PT),
+        PDF_ITEM_LABEL_MAX_FONT_SIZE_PT
+    );
     const paddingMm = mmPerWorkspacePixel
         ? WORKSPACE_ITEM_LABEL_PADDING_PX * mmPerWorkspacePixel
         : WORKSPACE_ITEM_LABEL_PADDING_PX * 0.25;
@@ -2391,6 +2400,9 @@ function renderItemsSummaryTable(doc, rows, shouldStartOnNewPage) {
     const commentWidth = Math.max(tableWidth - itemWidth - locationWidth - lastModifiedWidth, 40);
     const headerHeight = 8;
     let cursorY = margin;
+    const bodyFontSizePt = PDF_TABLE_BODY_FONT_SIZE_PT;
+    const bodyFontSizeMm = bodyFontSizePt * MM_PER_POINT;
+    const bodyLineHeightMm = bodyFontSizeMm * PDF_TABLE_BODY_LINE_HEIGHT;
 
     const drawHeader = (title) => {
         doc.setFontSize(16);
@@ -2420,22 +2432,25 @@ function renderItemsSummaryTable(doc, rows, shouldStartOnNewPage) {
     tableRows.forEach((row, index) => {
         const itemText = doc.splitTextToSize(row.itemLabel, itemWidth - 2);
         const locationText = doc.splitTextToSize(row.locationLabel, locationWidth - 2);
-        const commentText = doc.splitTextToSize(row.comment || '—', commentWidth - 2);
+        const safeComment = typeof row.comment === 'string' && row.comment.trim() ? row.comment.trim() : '—';
+        const commentText = doc.splitTextToSize(safeComment, commentWidth - 2);
         const rowLines = Math.max(itemText.length, locationText.length, commentText.length, 1);
-        const rowHeight = rowLines * 5 + 2;
+        const rowHeight =
+            PDF_TABLE_ROW_TOP_PADDING_MM + rowLines * bodyLineHeightMm + PDF_TABLE_ROW_BOTTOM_PADDING_MM;
         if (cursorY + rowHeight > pageHeight - margin) {
             doc.addPage('a4', 'portrait');
             cursorY = margin;
             drawHeader('Item summary (cont.)');
         }
-        doc.setFontSize(9);
+        doc.setFontSize(bodyFontSizePt);
         doc.setTextColor(15, 23, 42);
-        doc.text(itemText, margin + 1, cursorY + 2, { baseline: 'top' });
-        doc.text(locationText, margin + itemWidth + 1, cursorY + 2, { baseline: 'top' });
-        doc.text(formatTableDate(row.lastModified) || '—', margin + itemWidth + locationWidth + 1, cursorY + 2, {
+        const textTop = cursorY + PDF_TABLE_ROW_TOP_PADDING_MM;
+        doc.text(itemText, margin + 1, textTop, { baseline: 'top' });
+        doc.text(locationText, margin + itemWidth + 1, textTop, { baseline: 'top' });
+        doc.text(formatTableDate(row.lastModified) || '—', margin + itemWidth + locationWidth + 1, textTop, {
             baseline: 'top',
         });
-        doc.text(commentText, margin + itemWidth + locationWidth + lastModifiedWidth + 1, cursorY + 2, {
+        doc.text(commentText, margin + itemWidth + locationWidth + lastModifiedWidth + 1, textTop, {
             baseline: 'top',
         });
         cursorY += rowHeight;
