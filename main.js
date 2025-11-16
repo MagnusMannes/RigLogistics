@@ -428,6 +428,18 @@ function serializePlanningEditingItems() {
     });
 }
 
+function touchCurrentDeckTimestamp() {
+    if (!currentDeck) {
+        return;
+    }
+    const updatedAt = Date.now();
+    currentDeck.updatedAt = updatedAt;
+    const target = decks.find((deck) => deck.id === currentDeck.id);
+    if (target) {
+        target.updatedAt = updatedAt;
+    }
+}
+
 function persistCurrentPlanningJob() {
     if (!planningState.active) {
         return;
@@ -441,14 +453,7 @@ function persistCurrentPlanningJob() {
         return;
     }
     job.deck.items = serializePlanningEditingItems();
-    if (currentDeck) {
-        const updatedAt = Date.now();
-        currentDeck.updatedAt = updatedAt;
-        const target = decks.find((deck) => deck.id === currentDeck.id);
-        if (target) {
-            target.updatedAt = updatedAt;
-        }
-    }
+    touchCurrentDeckTimestamp();
     saveDecks();
     renderPlanningJobOverlay(job);
 }
@@ -1562,6 +1567,7 @@ function deletePlanningJob(jobId) {
     }
     jobs.splice(index, 1);
     planningState.activeJobIds.delete(jobId);
+    touchCurrentDeckTimestamp();
     saveDecks();
     renderPlanningJobs();
     refreshItemList();
@@ -2673,6 +2679,7 @@ function handleCreatePlanningJob() {
     planningState.activeJobIds.clear();
     planningState.activeJobIds.add(job.id);
     setPlanningEditingJob(job.id);
+    touchCurrentDeckTimestamp();
     saveDecks();
     renderPlanningJobs();
     persistPlanningPreferencesForCurrentDeck();
