@@ -2218,7 +2218,7 @@ function buildItemLabelLayout(doc, label, width, height, shape, scale) {
     const computedFontSizePt = mmPerWorkspacePixel
         ? (WORKSPACE_ITEM_FONT_SIZE_PX * mmPerWorkspacePixel) / MM_PER_POINT
         : FALLBACK_ITEM_FONT_SIZE_PT;
-    const fontSizePt = Math.min(
+    const maxFontSizePt = Math.min(
         Math.max(computedFontSizePt, PDF_ITEM_LABEL_MIN_FONT_SIZE_PT),
         PDF_ITEM_LABEL_MAX_FONT_SIZE_PT
     );
@@ -2226,15 +2226,30 @@ function buildItemLabelLayout(doc, label, width, height, shape, scale) {
         ? WORKSPACE_ITEM_LABEL_PADDING_PX * mmPerWorkspacePixel
         : WORKSPACE_ITEM_LABEL_PADDING_PX * 0.25;
     const availableWidth = Math.max(bounds.width - paddingMm * 2, bounds.width * 0.25, 2);
-    const availableHeight = Math.max(bounds.height - paddingMm * 2, fontSizePt * MM_PER_POINT);
     const safeText = typeof label === 'string' ? label.trim() : '';
-    doc.setFontSize(fontSizePt);
-    const lines = safeText ? doc.splitTextToSize(safeText, availableWidth) : [];
-    const fontSizeMm = fontSizePt * MM_PER_POINT;
-    const lineHeightMm = fontSizeMm * WORKSPACE_ITEM_LINE_HEIGHT;
-    const maxLines = Math.max(Math.floor(availableHeight / lineHeightMm), 1);
-    const trimmedLines = lines.slice(0, maxLines);
-    return { lines: trimmedLines, fontSize: fontSizePt, lineHeight: WORKSPACE_ITEM_LINE_HEIGHT };
+    const minimumHeight = maxFontSizePt * MM_PER_POINT;
+    const availableHeight = Math.max(bounds.height - paddingMm * 2, minimumHeight);
+    if (!safeText) {
+        return { lines: [], fontSize: maxFontSizePt, lineHeight: WORKSPACE_ITEM_LINE_HEIGHT };
+    }
+
+    let fontSizePt = maxFontSizePt;
+    let lines = [];
+    let lineHeightMm = 0;
+
+    while (fontSizePt >= PDF_ITEM_LABEL_MIN_FONT_SIZE_PT) {
+        doc.setFontSize(fontSizePt);
+        lines = doc.splitTextToSize(safeText, availableWidth);
+        const fontSizeMm = fontSizePt * MM_PER_POINT;
+        lineHeightMm = fontSizeMm * WORKSPACE_ITEM_LINE_HEIGHT;
+        const totalHeight = lines.length * lineHeightMm;
+        if (totalHeight <= availableHeight || fontSizePt === PDF_ITEM_LABEL_MIN_FONT_SIZE_PT) {
+            break;
+        }
+        fontSizePt = Math.max(fontSizePt - 0.5, PDF_ITEM_LABEL_MIN_FONT_SIZE_PT);
+    }
+
+    return { lines, fontSize: fontSizePt, lineHeight: WORKSPACE_ITEM_LINE_HEIGHT };
 }
 
 function fitTextWithinRect(doc, text, width, height, { maxFontSize = 10, minFontSize = 6, lineHeight = 1.2 } = {}) {
