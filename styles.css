@@ -908,8 +908,11 @@ button.icon-button {
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.15s ease, transform 0.15s ease;
-    max-width: 240px;
-    word-break: break-word;
+    min-width: min(30ch, 280px);
+    max-width: min(32ch, 320px);
+    text-align: left;
+    word-break: normal;
+    overflow-wrap: break-word;
     z-index: 5;
 }
 
