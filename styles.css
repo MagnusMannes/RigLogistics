@@ -890,6 +890,20 @@ button.icon-button {
     clip-path: none;
 }
 
+.item.item-backloaded {
+    border-width: 4px;
+    border-style: solid;
+    border-color: transparent;
+    border-image-slice: 1;
+    border-image-source: repeating-linear-gradient(
+        135deg,
+        #000000 0px,
+        #000000 10px,
+        #facc15 10px,
+        #facc15 20px
+    );
+}
+
 .item[data-comment]:not([data-comment=''])::after {
     content: attr(data-comment);
     position: absolute;

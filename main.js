@@ -251,6 +251,56 @@ function applyItemDeckLayerStyles(element) {
     element.style.zIndex = deckLayer ? '0' : '';
 }
 
+function isItemBackloaded(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return false;
+    }
+    return element.dataset.backloaded === 'true';
+}
+
+function applyItemBackloadStyles(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    element.classList.toggle('item-backloaded', isItemBackloaded(element));
+}
+
+function setItemBackloadState(element, backloaded, { recordHistory = true } = {}) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const shouldEnable = backloaded === true || backloaded === 'true';
+    const currentlyEnabled = isItemBackloaded(element);
+    if (shouldEnable === currentlyEnabled) {
+        return;
+    }
+    element.dataset.backloaded = shouldEnable ? 'true' : 'false';
+    applyItemBackloadStyles(element);
+    if (isPlanningItem(element)) {
+        if (recordHistory) {
+            persistCurrentPlanningJob();
+        }
+        return;
+    }
+    if (!recordHistory) {
+        return;
+    }
+    const labelSuffix = getItemHistoryLabel(element);
+    const message = shouldEnable
+        ? `Item marked as backload${labelSuffix}`
+        : `Item backload cleared${labelSuffix}`;
+    addHistoryEntry(message);
+    updateItemRecord(element, message, { updateComment: false, updateDeck: false });
+}
+
+function toggleItemBackloadState(element) {
+    if (!element || element.dataset.type !== 'item') {
+        return;
+    }
+    const shouldEnable = !isItemBackloaded(element);
+    setItemBackloadState(element, shouldEnable);
+}
+
 function setItemShape(element, shape, { recordHistory = true } = {}) {
     if (!element || element.dataset.type !== 'item') {
         return;
@@ -393,6 +443,8 @@ function loadPlanningJobForEditing(job) {
             element.dataset.height = entry.height.toString();
             element.dataset.locked = entry.locked ? 'true' : 'false';
             element.classList.toggle('locked', entry.locked);
+            element.dataset.backloaded = entry.backloaded ? 'true' : 'false';
+            applyItemBackloadStyles(element);
             element.classList.add('planning-edit-item');
             element.style.background = entry.color;
             element.style.width = `${metersToPixels(entry.width)}px`;
@@ -430,6 +482,7 @@ function serializePlanningEditingItems() {
             comment: (element.dataset.comment || '').trim(),
             shape: getItemShape(element),
             deckLayer: isItemOnDeckLayer(element),
+            backloaded: isItemBackloaded(element),
         };
     });
 }
@@ -1008,6 +1061,7 @@ function normalizePlanningItem(item) {
         typeof item.color === 'string' && item.color.trim() ? item.color : '#3a7afe';
     normalized.shape = normalizeItemShape(item.shape);
     normalized.deckLayer = item.deckLayer === true || item.deckLayer === 'true';
+    normalized.backloaded = item.backloaded === true || item.backloaded === 'true';
     return normalized;
 }
 
@@ -1061,6 +1115,7 @@ function planningItemToSerializable(item) {
         result.color = item.color ?? '#3a7afe';
         result.shape = normalizeItemShape(item.shape);
         result.deckLayer = item.deckLayer === true || item.deckLayer === 'true';
+        result.backloaded = item.backloaded === true || item.backloaded === 'true';
     } else if (item.type === 'deck-area') {
         result.nameHidden = Boolean(item.nameHidden);
     }
@@ -1145,6 +1200,7 @@ function layoutEntryToSerializable(entry) {
         base.comment = typeof entry.comment === 'string' ? entry.comment : '';
         base.shape = normalizeItemShape(entry.shape);
         base.deckLayer = entry.deckLayer === true || entry.deckLayer === 'true';
+        base.backloaded = entry.backloaded === true || entry.backloaded === 'true';
         if (typeof entry.id === 'string' && entry.id.trim()) {
             base.id = entry.id.trim();
         }
@@ -1364,6 +1420,7 @@ function renderPlanningJobOverlay(job) {
         const deckLayerEnabled = item.deckLayer === true || item.deckLayer === 'true';
         element.classList.toggle('deck-layer-item', deckLayerEnabled);
         element.style.zIndex = deckLayerEnabled ? '0' : '1';
+        element.classList.toggle('item-backloaded', item.backloaded === true || item.backloaded === 'true');
         if (item.type === 'item') {
             const color = item.color || '#3a7afe';
             element.style.background = color;
@@ -1615,6 +1672,7 @@ function serializeWorkspaceElements() {
             itemData.comment = (element.dataset.comment || '').trim();
             itemData.shape = getItemShape(element);
             itemData.deckLayer = isItemOnDeckLayer(element);
+            itemData.backloaded = isItemBackloaded(element);
             const itemId = element.dataset.itemId;
             if (itemId) {
                 itemData.id = itemId;
@@ -2529,6 +2587,7 @@ function normalizeWorkspaceLayoutEntry(entry) {
         normalized.color = color;
         normalized.shape = normalizeItemShape(entry.shape);
         normalized.deckLayer = entry.deckLayer === true || entry.deckLayer === 'true';
+        normalized.backloaded = entry.backloaded === true || entry.backloaded === 'true';
         normalized.comment = typeof entry.comment === 'string' ? entry.comment : '';
         normalized.id = id;
         const attachmentsSource = Array.isArray(entry.attachments) ? entry.attachments : [];
@@ -2618,6 +2677,8 @@ function loadWorkspaceLayout(entries, { recordHistory = false } = {}) {
                 element.dataset.comment = normalized.comment || '';
                 element.dataset.locked = normalized.locked ? 'true' : 'false';
                 element.classList.toggle('locked', normalized.locked);
+                element.dataset.backloaded = normalized.backloaded ? 'true' : 'false';
+                applyItemBackloadStyles(element);
                 element.dataset.itemId = normalized.id;
                 const parsedLastModified = new Date(normalized.lastModified);
                 const lastModifiedDate = Number.isNaN(parsedLastModified.getTime())
@@ -3671,6 +3732,7 @@ function createItemElement(
     element.dataset.height = height.toString();
     element.dataset.locked = 'false';
     element.dataset.comment = '';
+    element.dataset.backloaded = 'false';
     element.style.width = `${metersToPixels(width)}px`;
     element.style.height = `${metersToPixels(height)}px`;
     const centeredPosition = autoPosition ? calculateCenteredPosition(width, height) : null;
@@ -3684,6 +3746,7 @@ function createItemElement(
         applyItemShapeStyles(element, shape);
         element.dataset.deckLayer = deckLayer ? 'true' : 'false';
         applyItemDeckLayerStyles(element);
+        applyItemBackloadStyles(element);
         if (!skipMetadata) {
             updateAttachmentIndicator(element);
         } else {
@@ -4077,6 +4140,8 @@ function duplicateItem(element) {
         },
         duplicateOptions
     );
+    duplicate.dataset.backloaded = isItemBackloaded(element) ? 'true' : 'false';
+    applyItemBackloadStyles(duplicate);
     const offset = 40;
     const baseX = parseFloat(element.dataset.x) || 0;
     const baseY = parseFloat(element.dataset.y) || 0;
@@ -4697,6 +4762,8 @@ function handleContextAction(action) {
             setItemLockState(activeItem, false);
         } else if (action === 'comment') {
             promptItemComment(activeItem);
+        } else if (action === 'toggle-backload') {
+            toggleItemBackloadState(activeItem);
         }
     }
     closeContextMenu();
@@ -4730,6 +4797,7 @@ function getContextMenuActions(element) {
     }
     actions.push({ action: locked ? 'unlock-item' : 'lock-item', label: locked ? 'Unlock item' : 'Lock item' });
     actions.push({ action: 'comment', label: hasComment ? 'Edit comment' : 'Add comment' });
+    actions.push({ action: 'toggle-backload', label: 'Backload' });
     actions.push({ action: 'delete', label: 'Delete', className: 'danger' });
     return actions;
 }
