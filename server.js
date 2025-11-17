@@ -219,6 +219,7 @@ function normalizeLayoutEntry(entry) {
     const comment = typeof entry.comment === 'string' ? entry.comment : '';
     const shape = normalizeItemShape(entry.shape);
     const deckLayer = entry.deckLayer === true || entry.deckLayer === 'true';
+    const backloaded = entry.backloaded === true || entry.backloaded === 'true';
     const attachments = Array.isArray(entry.attachments)
       ? entry.attachments.map((item) => normalizeAttachment(item)).filter(Boolean)
       : [];
@@ -252,6 +253,7 @@ function normalizeLayoutEntry(entry) {
       comment,
       shape,
       deckLayer,
+      backloaded,
       attachments,
       history,
       lastModified,
@@ -279,6 +281,7 @@ function normalizePlanningItem(item) {
   const comment = typeof item.comment === 'string' ? item.comment : '';
   const shape = normalizeItemShape(item.shape);
   const deckLayer = item.deckLayer === true || item.deckLayer === 'true';
+  const backloaded = item.backloaded === true || item.backloaded === 'true';
   return {
     type: 'item',
     label,
@@ -291,7 +294,8 @@ function normalizePlanningItem(item) {
     color,
     comment,
     shape,
-    deckLayer
+    deckLayer,
+    backloaded
   };
 }
 
