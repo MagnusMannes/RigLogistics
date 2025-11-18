@@ -170,6 +170,7 @@ let itemIdCounter = 0;
 let attachmentIdCounter = 0;
 let historySortMode = 'alpha';
 let historySearchQuery = '';
+const SEARCH_HIGHLIGHT_CLASS = 'item-search-highlight';
 const measurementState = {
     active: false,
     points: [],
@@ -192,6 +193,7 @@ let pendingStateVersion = pendingOperations.length
     ? pendingOperations[pendingOperations.length - 1].version
     : null;
 let jsPdfLoaderPromise = null;
+let activeSearchHighlightIds = new Set();
 
 if (typeof window !== 'undefined') {
     window.addEventListener('online', () => {
@@ -3142,6 +3144,7 @@ function refreshItemList() {
     }
 
     const normalizedQuery = historySearchQuery.trim().toLowerCase();
+    const searchActive = Boolean(normalizedQuery);
     if (normalizedQuery) {
         items = items.filter((item) => {
             const label = (item.label || '').toLowerCase();
@@ -3156,6 +3159,7 @@ function refreshItemList() {
         empty.className = 'list-empty';
         empty.textContent = normalizedQuery ? 'No items match your search.' : 'No items yet.';
         historyList.appendChild(empty);
+        updateWorkspaceSearchHighlights([], searchActive);
         return;
     }
 
@@ -3231,6 +3235,35 @@ function refreshItemList() {
         li.append(header, deckEl, modifiedEl, attachmentsEl, commentEl);
         historyList.appendChild(li);
     });
+
+    updateWorkspaceSearchHighlights(items, searchActive);
+}
+
+function updateWorkspaceSearchHighlights(matchedItems, searchActive) {
+    const nextHighlightedIds = new Set();
+    if (searchActive && Array.isArray(matchedItems)) {
+        matchedItems.forEach((item) => {
+            if (!item || !item.element) {
+                return;
+            }
+            const element = item.element;
+            element.classList.add(SEARCH_HIGHLIGHT_CLASS);
+            nextHighlightedIds.add(item.id);
+        });
+    }
+
+    activeSearchHighlightIds.forEach((id) => {
+        if (nextHighlightedIds.has(id)) {
+            return;
+        }
+        const metadata = itemMetadata.get(id);
+        const element = metadata?.element;
+        if (element) {
+            element.classList.remove(SEARCH_HIGHLIGHT_CLASS);
+        }
+    });
+
+    activeSearchHighlightIds = nextHighlightedIds;
 }
 
 function loadPendingOperations() {

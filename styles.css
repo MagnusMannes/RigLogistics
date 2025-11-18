@@ -890,6 +890,22 @@ button.icon-button {
     clip-path: none;
 }
 
+.item-search-highlight {
+    border-color: #facc15 !important;
+    box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.35), 0 0 18px rgba(250, 204, 21, 0.65);
+    animation: item-search-highlight-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes item-search-highlight-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.3), 0 0 10px rgba(250, 204, 21, 0.45);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(250, 204, 21, 0.55), 0 0 22px rgba(250, 204, 21, 0.85);
+    }
+}
+
 .item.item-backloaded {
     border-width: 4px;
     border-style: solid;
