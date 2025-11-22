@@ -2492,13 +2492,6 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
     const usableHeight = pageHeight - drawingTop - margin;
     const deckWidth = Math.max(safeBounds.width, 0.5);
     const deckHeight = Math.max(safeBounds.height, 0.5);
-    const maxDeckWidth = pageWidth - margin * 2 - calloutColumnWidth - calloutGap;
-    const maxDeckHeight = usableHeight;
-    const scale = Math.min(maxDeckWidth / deckWidth, maxDeckHeight / deckHeight);
-    const offsetX = margin;
-    const offsetY = drawingTop;
-    const calloutX = offsetX + deckWidth * scale + calloutGap;
-    const calloutWidth = Math.max(pageWidth - margin - calloutX, calloutColumnWidth);
     const pageTitle = typeof title === 'string' && title.trim() ? title.trim() : deckName;
     doc.setFontSize(16);
     doc.setTextColor(15, 23, 42);
@@ -2511,15 +2504,14 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
         return;
     }
 
-    drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
-        scale,
-        offsetX,
-        offsetY,
-        hideItemLabels: true,
-    });
-
     const itemEntries = sortedEntries.filter((entry) => entry.type === 'item');
     if (!itemEntries.length) {
+        drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
+            scale: Math.min((pageWidth - margin * 2) / deckWidth, usableHeight / deckHeight),
+            offsetX: margin,
+            offsetY: drawingTop,
+            hideItemLabels: true,
+        });
         return;
     }
 
@@ -2547,45 +2539,205 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
         })
         .map(({ item }) => item);
 
-    const idealRowHeight = usableHeight / Math.max(sortedItems.length, 1);
-    let rowHeight = Math.min(Math.max(idealRowHeight, 6), 14);
-    if (rowHeight * sortedItems.length > usableHeight) {
-        rowHeight = Math.max(usableHeight / sortedItems.length, 4);
-    }
-    const totalRowsHeight = rowHeight * sortedItems.length;
-    const columnTop = totalRowsHeight < usableHeight ? drawingTop + (usableHeight - totalRowsHeight) / 2 : drawingTop;
-    const labelMargin = 6;
+    const deckCenterX = safeBounds.minX + safeBounds.width / 2;
 
-    doc.setFontSize(11);
-    doc.text('Items', calloutX, columnTop - 4);
+    const computeRowHeight = (count, availableHeightForColumn) => {
+        if (!count || availableHeightForColumn <= 0) {
+            return 0;
+        }
+        const idealRowHeight = availableHeightForColumn / Math.max(count, 1);
+        let rowHeight = Math.min(Math.max(idealRowHeight, 6), 14);
+        if (rowHeight * count > availableHeightForColumn) {
+            rowHeight = Math.max(availableHeightForColumn / count, 4.5);
+        }
+        return rowHeight;
+    };
 
-    sortedItems.forEach((item, index) => {
-        const rowTop = columnTop + rowHeight * index;
-        const rowCenterY = rowTop + rowHeight / 2;
-        doc.setFillColor(248, 250, 252);
-        doc.setDrawColor(226, 232, 240);
-        doc.rect(calloutX, rowTop, calloutWidth, rowHeight, 'FD');
-
-        const label = item.label || 'Item';
-        const lines = doc.splitTextToSize(label, calloutWidth - labelMargin * 2);
-        const textLineHeight = Math.min(rowHeight / Math.max(lines.length, 1), 4.5);
-        const textBlockHeight = lines.length * textLineHeight;
-        const textStartY = rowCenterY - textBlockHeight / 2 + textLineHeight / 2;
-        doc.setTextColor(15, 23, 42);
-        doc.setFontSize(10);
-        lines.forEach((line, lineIndex) => {
-            doc.text(line, calloutX + labelMargin, textStartY + lineIndex * textLineHeight, { baseline: 'middle' });
+    const splitItemsAcrossSides = (items, { left, right }) => {
+        const leftItems = [];
+        const rightItems = [];
+        items.forEach((item) => {
+            const center = getItemCenterInMeters(item);
+            if (left && right) {
+                if (center.x <= deckCenterX) {
+                    leftItems.push(item);
+                } else {
+                    rightItems.push(item);
+                }
+            } else if (left) {
+                leftItems.push(item);
+            } else {
+                rightItems.push(item);
+            }
         });
+        if (left && right) {
+            if (!leftItems.length && rightItems.length > 1) {
+                leftItems.push(...rightItems.splice(0, Math.ceil(rightItems.length / 2)));
+            } else if (!rightItems.length && leftItems.length > 1) {
+                rightItems.push(...leftItems.splice(Math.floor(leftItems.length / 2)));
+            }
+        }
+        return { leftItems, rightItems };
+    };
 
-        const itemCenter = getItemCenterInMeters(item);
-        const itemCenterX = offsetX + (itemCenter.x - safeBounds.minX) * scale;
-        const itemCenterY = offsetY + (itemCenter.y - safeBounds.minY) * scale;
-        doc.setDrawColor(15, 23, 42);
-        doc.setFillColor(255, 255, 255);
-        doc.setLineWidth(0.4);
-        doc.circle(calloutX, rowCenterY, 1.6, 'FD');
-        doc.circle(itemCenterX, itemCenterY, 1.6, 'FD');
-        doc.line(calloutX, rowCenterY, itemCenterX, itemCenterY);
+    const buildVerticalLayout = ({ includeLeft, includeRight }) => {
+        const leftColumnReserved = includeLeft ? calloutColumnWidth + calloutGap : 0;
+        const rightColumnReserved = includeRight ? calloutColumnWidth + calloutGap : 0;
+        const maxDeckWidth = pageWidth - margin * 2 - leftColumnReserved - rightColumnReserved;
+        const maxDeckHeight = usableHeight;
+        const scale = Math.min(maxDeckWidth / deckWidth, maxDeckHeight / deckHeight);
+        const deckDrawWidth = deckWidth * scale;
+        const deckDrawHeight = deckHeight * scale;
+        const offsetX = margin + leftColumnReserved;
+        const offsetY = drawingTop + Math.max((usableHeight - deckDrawHeight) / 2, 0);
+        const { leftItems, rightItems } = splitItemsAcrossSides(sortedItems, {
+            left: includeLeft,
+            right: includeRight,
+        });
+        const columnHeight = usableHeight;
+        const columns = [];
+        if (includeLeft && leftItems.length) {
+            const rowHeight = computeRowHeight(leftItems.length, columnHeight);
+            const totalRowsHeight = rowHeight * leftItems.length;
+            const columnTop = totalRowsHeight < columnHeight ? drawingTop + (columnHeight - totalRowsHeight) / 2 : drawingTop;
+            columns.push({
+                side: 'left',
+                items: leftItems,
+                x: margin,
+                width: calloutColumnWidth,
+                top: columnTop,
+                rowHeight,
+            });
+        }
+        if (includeRight && rightItems.length) {
+            const rowHeight = computeRowHeight(rightItems.length, columnHeight);
+            const totalRowsHeight = rowHeight * rightItems.length;
+            const columnTop = totalRowsHeight < columnHeight ? drawingTop + (columnHeight - totalRowsHeight) / 2 : drawingTop;
+            const columnX = offsetX + deckDrawWidth + calloutGap;
+            const width = Math.max(pageWidth - margin - columnX, calloutColumnWidth);
+            columns.push({
+                side: 'right',
+                items: rightItems,
+                x: columnX,
+                width,
+                top: columnTop,
+                rowHeight,
+            });
+        }
+        const minRowHeight = columns.length ? Math.min(...columns.map((column) => column.rowHeight || 0)) : 0;
+        const score = minRowHeight + (columns.length > 1 ? 1 : 0);
+        return {
+            type: 'vertical',
+            includeLeft,
+            includeRight,
+            scale,
+            offsetX,
+            offsetY,
+            columns,
+            score,
+        };
+    };
+
+    const buildBottomLayout = () => {
+        const columnsCount = sortedItems.length > 10 ? 2 : 1;
+        const maxDeckWidth = pageWidth - margin * 2;
+        const maxCalloutHeight = Math.min(Math.max(usableHeight * 0.4, 28), 84);
+        let calloutHeight = maxCalloutHeight;
+        const maxDeckHeight = Math.max(usableHeight - calloutHeight - calloutGap, 12);
+        const scale = Math.min(maxDeckWidth / deckWidth, maxDeckHeight / deckHeight);
+        const deckDrawHeight = deckHeight * scale;
+        const deckOffsetY = drawingTop + Math.max((maxDeckHeight - deckDrawHeight) / 2, 0);
+        const rowCount = Math.ceil(sortedItems.length / columnsCount);
+        const rowHeight = computeRowHeight(rowCount, calloutHeight);
+        const actualCalloutHeight = rowHeight * rowCount;
+        calloutHeight = actualCalloutHeight;
+        const calloutTop = Math.min(pageHeight - margin - calloutHeight, deckOffsetY + deckDrawHeight + calloutGap);
+        const calloutWidth = (pageWidth - margin * 2) / columnsCount;
+        const columns = Array.from({ length: columnsCount }, (_, columnIndex) => ({
+            side: 'bottom',
+            x: margin + calloutWidth * columnIndex,
+            width: calloutWidth,
+            top: calloutTop,
+            rowHeight,
+            items: sortedItems.filter((_, itemIndex) => Math.floor(itemIndex / rowCount) === columnIndex),
+        })).filter((column) => column.items.length);
+        const minRowHeight = columns.length ? Math.min(...columns.map((column) => column.rowHeight || 0)) : 0;
+        return {
+            type: 'bottom',
+            includeLeft: false,
+            includeRight: false,
+            scale,
+            offsetX: margin,
+            offsetY: deckOffsetY,
+            columns,
+            score: minRowHeight,
+        };
+    };
+
+    const candidateLayouts = [
+        buildVerticalLayout({ includeLeft: false, includeRight: true }),
+        buildVerticalLayout({ includeLeft: true, includeRight: true }),
+        buildVerticalLayout({ includeLeft: true, includeRight: false }),
+        buildBottomLayout(),
+    ];
+
+    const chosenLayout = candidateLayouts
+        .filter((layout) => layout.columns.length)
+        .sort((a, b) => b.score - a.score)[0];
+
+    if (!chosenLayout) {
+        return;
+    }
+
+    drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
+        scale: chosenLayout.scale,
+        offsetX: chosenLayout.offsetX,
+        offsetY: chosenLayout.offsetY,
+        hideItemLabels: true,
+    });
+
+    const labelMargin = 6;
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+
+    chosenLayout.columns.forEach((column) => {
+        const columnLabel = column.side === 'bottom' ? 'Items (bottom)' : 'Items';
+        const headerYPosition = column.side === 'bottom' ? column.top - 4 : column.top - 4;
+        doc.text(columnLabel, column.x, headerYPosition);
+
+        column.items.forEach((item, index) => {
+            const rowTop = column.top + column.rowHeight * index;
+            const rowCenterY = rowTop + column.rowHeight / 2;
+            doc.setFillColor(248, 250, 252);
+            doc.setDrawColor(226, 232, 240);
+            doc.rect(column.x, rowTop, column.width, column.rowHeight, 'FD');
+
+            const label = item.label || 'Item';
+            const lines = doc.splitTextToSize(label, column.width - labelMargin * 2);
+            const textLineHeight = Math.min(column.rowHeight / Math.max(lines.length, 1), 4.5);
+            const textBlockHeight = lines.length * textLineHeight;
+            const textStartY = rowCenterY - textBlockHeight / 2 + textLineHeight / 2;
+            doc.setTextColor(15, 23, 42);
+            doc.setFontSize(10);
+            lines.forEach((line, lineIndex) => {
+                doc.text(line, column.x + labelMargin, textStartY + lineIndex * textLineHeight, { baseline: 'middle' });
+            });
+
+            const itemCenter = getItemCenterInMeters(item);
+            const itemCenterX = chosenLayout.offsetX + (itemCenter.x - safeBounds.minX) * chosenLayout.scale;
+            const itemCenterY = chosenLayout.offsetY + (itemCenter.y - safeBounds.minY) * chosenLayout.scale;
+            const calloutAnchorX = column.side === 'bottom'
+                ? column.x + column.width / 2
+                : column.side === 'right'
+                ? column.x
+                : column.x + column.width;
+            doc.setDrawColor(15, 23, 42);
+            doc.setFillColor(255, 255, 255);
+            doc.setLineWidth(0.4);
+            doc.circle(calloutAnchorX, rowCenterY, 1.6, 'FD');
+            doc.circle(itemCenterX, itemCenterY, 1.6, 'FD');
+            doc.line(calloutAnchorX, rowCenterY, itemCenterX, itemCenterY);
+        });
     });
 }
 
