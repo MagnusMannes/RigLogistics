@@ -193,6 +193,7 @@ let pendingStateVersion = pendingOperations.length
     ? pendingOperations[pendingOperations.length - 1].version
     : null;
 let jsPdfLoaderPromise = null;
+let html2CanvasLoaderPromise = null;
 let activeSearchHighlightIds = new Set();
 
 if (typeof window !== 'undefined') {
@@ -786,21 +787,31 @@ async function handlePrintToPdf() {
         });
 
         const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
-        const deckAreaGroups = sortDeckAreaGroupsAlphabetically(groupDeckAreasForPrint(deckAreas));
-        deckAreaGroups.forEach((group) => {
-            const groupEntries = buildDeckAreaGroupEntries(group, entries);
-            if (!groupEntries.length) {
-                return;
+        const collator = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
+        const sortedDeckAreas = deckAreas.slice().sort((a, b) => {
+            const labelA = typeof a.label === 'string' && a.label.trim() ? a.label.trim() : 'Deck area';
+            const labelB = typeof b.label === 'string' && b.label.trim() ? b.label.trim() : 'Deck area';
+            if (collator) {
+                return collator.compare(labelA, labelB);
             }
-            const groupBounds = buildDeckAreaGroupBounds(groupEntries);
-            const orientation = determineDeckPageOrientation(groupBounds);
-            doc.addPage('a4', orientation);
-            renderDeckAreaCalloutPage(doc, currentDeck, groupEntries, {
-                bounds: groupBounds,
-                orientation,
-                title: buildDeckAreaGroupTitle(currentDeck?.name, group),
-            });
+            return labelA.localeCompare(labelB);
         });
+
+        for (const deckArea of sortedDeckAreas) {
+            const areaEntries = buildDeckAreaGroupEntries([deckArea], entries);
+            if (!areaEntries.length) {
+                continue;
+            }
+            const areaBounds = buildDeckAreaGroupBounds(areaEntries, 0.5);
+            const orientation = determineDeckPageOrientation(areaBounds);
+            const snapshot = await captureDeckAreaSnapshotImage(deckArea);
+            doc.addPage('a4', orientation);
+            renderDeckAreaSnapshotPage(doc, currentDeck, deckArea, areaEntries, {
+                bounds: areaBounds,
+                orientation,
+                snapshot,
+            });
+        }
 
         const tableRows = buildItemTableRows(currentDeck, entries);
         const shouldStartSummaryOnNewPage = doc.getNumberOfPages() > 0;
@@ -1824,6 +1835,34 @@ async function ensureJsPdfLoaded() {
     }
 }
 
+async function ensureHtml2CanvasLoaded() {
+    if (window.html2canvas) {
+        return window.html2canvas;
+    }
+    if (!html2CanvasLoaderPromise) {
+        html2CanvasLoaderPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+            script.async = true;
+            script.onload = () => {
+                if (window.html2canvas) {
+                    resolve(window.html2canvas);
+                } else {
+                    reject(new Error('html2canvas did not initialize'));
+                }
+            };
+            script.onerror = () => reject(new Error('Failed to load html2canvas'));
+            document.body.appendChild(script);
+        });
+    }
+    try {
+        return await html2CanvasLoaderPromise;
+    } catch (error) {
+        html2CanvasLoaderPromise = null;
+        throw error;
+    }
+}
+
 function hexToRgb(color) {
     if (typeof color !== 'string') {
         return { r: 58, g: 122, b: 254 };
@@ -2106,6 +2145,103 @@ function sortDeckAreaGroupsAlphabetically(groups) {
             }
             return keyA.localeCompare(keyB);
         });
+}
+
+function findDeckAreaElementForEntry(entry) {
+    if (!entry || entry.type !== 'deck-area' || !workspaceContent) {
+        return null;
+    }
+    const deckAreas = getDeckAreaElements();
+    if (!deckAreas.length) {
+        return null;
+    }
+    const targetX = Number(entry.x) || 0;
+    const targetY = Number(entry.y) || 0;
+    const targetWidth = Number(entry.width) || DEFAULT_DECK_AREA_SIZE_METERS;
+    const targetHeight = Number(entry.height) || DEFAULT_DECK_AREA_SIZE_METERS;
+    const coordinateTolerance = 0.5;
+    const sizeTolerance = 0.25;
+    const matchedByPosition = deckAreas.find((element) => {
+        const elemX = Number.parseFloat(element.dataset.x) || 0;
+        const elemY = Number.parseFloat(element.dataset.y) || 0;
+        const elemWidth = Number.parseFloat(element.dataset.width) || DEFAULT_DECK_AREA_SIZE_METERS;
+        const elemHeight = Number.parseFloat(element.dataset.height) || DEFAULT_DECK_AREA_SIZE_METERS;
+        return (
+            Math.abs(elemX - targetX) <= coordinateTolerance &&
+            Math.abs(elemY - targetY) <= coordinateTolerance &&
+            Math.abs(elemWidth - targetWidth) <= sizeTolerance &&
+            Math.abs(elemHeight - targetHeight) <= sizeTolerance
+        );
+    });
+    if (matchedByPosition) {
+        return matchedByPosition;
+    }
+
+    const targetLabel = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : null;
+    if (!targetLabel) {
+        return null;
+    }
+    const collator = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
+    return (
+        deckAreas.find((element) => {
+            const label = element.dataset.label || element.textContent || '';
+            const trimmed = label.trim();
+            if (!trimmed) {
+                return false;
+            }
+            return collator ? collator.compare(trimmed, targetLabel) === 0 : trimmed === targetLabel;
+        }) || null
+    );
+}
+
+async function captureDeckAreaSnapshotImage(deckAreaEntry) {
+    if (!deckAreaEntry || deckAreaEntry.type !== 'deck-area' || !workspaceContent) {
+        return null;
+    }
+    const deckAreaElement = findDeckAreaElementForEntry(deckAreaEntry);
+    if (!deckAreaElement) {
+        return null;
+    }
+    const html2canvas = await ensureHtml2CanvasLoaded();
+    const workspaceRect = workspaceContent.getBoundingClientRect();
+    const deckRect = deckAreaElement.getBoundingClientRect();
+    const padding = 12;
+    const snapshotLeft = Math.max(deckRect.left - padding, workspaceRect.left);
+    const snapshotTop = Math.max(deckRect.top - padding, workspaceRect.top);
+    const snapshotRight = Math.min(deckRect.right + padding, workspaceRect.right);
+    const snapshotBottom = Math.min(deckRect.bottom + padding, workspaceRect.bottom);
+    const snapshotWidth = snapshotRight - snapshotLeft;
+    const snapshotHeight = snapshotBottom - snapshotTop;
+    if (snapshotWidth <= 0 || snapshotHeight <= 0) {
+        return null;
+    }
+
+    const fullCanvas = await html2canvas(workspaceContent, {
+        backgroundColor: '#f8fafc',
+        scale: window.devicePixelRatio || 1,
+    });
+    const dpr = window.devicePixelRatio || 1;
+    const cropX = Math.max(0, Math.round((snapshotLeft - workspaceRect.left) * dpr));
+    const cropY = Math.max(0, Math.round((snapshotTop - workspaceRect.top) * dpr));
+    const cropWidth = Math.min(fullCanvas.width - cropX, Math.round(snapshotWidth * dpr));
+    const cropHeight = Math.min(fullCanvas.height - cropY, Math.round(snapshotHeight * dpr));
+    if (cropWidth <= 0 || cropHeight <= 0) {
+        return null;
+    }
+
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = cropWidth;
+    croppedCanvas.height = cropHeight;
+    const ctx = croppedCanvas.getContext('2d');
+    if (!ctx) {
+        return null;
+    }
+    ctx.drawImage(fullCanvas, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    return {
+        dataUrl: croppedCanvas.toDataURL('image/png'),
+        pixelWidth: cropWidth,
+        pixelHeight: cropHeight,
+    };
 }
 
 function sortEntriesForPdf(entries) {
@@ -2587,6 +2723,57 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
         doc.circle(itemCenterX, itemCenterY, 1.6, 'FD');
         doc.line(calloutX, rowCenterY, itemCenterX, itemCenterY);
     });
+}
+
+function renderDeckAreaSnapshotPage(
+    doc,
+    deck,
+    deckArea,
+    entries,
+    { bounds, orientation, snapshot } = {}
+) {
+    const safeDeck = deck?.name || 'Deck';
+    const safeAreaLabel = typeof deckArea?.label === 'string' && deckArea.label.trim()
+        ? deckArea.label.trim()
+        : 'Deck area';
+    const safeBounds = bounds || buildDeckAreaGroupBounds(entries || [], 0.25);
+    const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
+    const { width: pageWidth, height: pageHeight } = getA4Dimensions(pageOrientation);
+    const margin = 12;
+    const headerHeight = 8;
+    const drawingWidth = pageWidth - margin * 2;
+    const drawingHeight = pageHeight - margin * 2 - headerHeight;
+    const pageTitle = `${safeDeck} – ${safeAreaLabel}`;
+
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(16);
+    doc.text(pageTitle, margin, margin + 2);
+
+    const sortedEntries = sortEntriesForPdf(Array.isArray(entries) ? entries : []);
+    if (snapshot?.dataUrl) {
+        const aspectRatio = snapshot.pixelWidth / snapshot.pixelHeight || 1;
+        let renderWidth = drawingWidth;
+        let renderHeight = renderWidth / aspectRatio;
+        if (renderHeight > drawingHeight) {
+            renderHeight = drawingHeight;
+            renderWidth = renderHeight * aspectRatio;
+        }
+        const imageX = margin + (drawingWidth - renderWidth) / 2;
+        const imageY = margin + headerHeight + (drawingHeight - renderHeight) / 2;
+        doc.addImage(snapshot.dataUrl, 'PNG', imageX, imageY, renderWidth, renderHeight);
+    } else {
+        const scale = Math.min(drawingWidth / safeBounds.width, drawingHeight / safeBounds.height);
+        const offsetX = margin;
+        const offsetY = margin + headerHeight;
+        doc.setFillColor(241, 245, 249);
+        doc.rect(offsetX, offsetY, safeBounds.width * scale, safeBounds.height * scale, 'F');
+        drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
+            scale,
+            offsetX,
+            offsetY,
+            hideItemLabels: false,
+        });
+    }
 }
 
 function renderItemsSummaryTable(doc, rows, shouldStartOnNewPage) {
