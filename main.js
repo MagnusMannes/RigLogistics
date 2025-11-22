@@ -1920,8 +1920,8 @@ function drawDeckAreaConnections(doc, deckAreas, bounds, scale, offsetX, offsetY
     if (!deckAreas.length) {
         return;
     }
-    doc.setDrawColor(148, 163, 184);
-    doc.setLineWidth(0.3);
+    doc.setDrawColor(15, 23, 42);
+    doc.setLineWidth(0.35);
     for (let i = 0; i < deckAreas.length; i += 1) {
         for (let j = i + 1; j < deckAreas.length; j += 1) {
             const a = deckAreas[i];
@@ -2524,14 +2524,28 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
     }
 
     const collator = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
-    const sortedItems = itemEntries.slice().sort((a, b) => {
-        const aLabel = (a.label || '').toString();
-        const bLabel = (b.label || '').toString();
-        if (collator) {
-            return collator.compare(aLabel, bLabel);
-        }
-        return aLabel.localeCompare(bLabel);
-    });
+    const sortedItems = itemEntries
+        .map((item) => ({
+            item,
+            center: getItemCenterInMeters(item),
+        }))
+        .sort((a, b) => {
+            const deltaY = a.center.y - b.center.y;
+            if (Math.abs(deltaY) > 0.01) {
+                return deltaY;
+            }
+            const deltaX = a.center.x - b.center.x;
+            if (Math.abs(deltaX) > 0.01) {
+                return deltaX;
+            }
+            const aLabel = (a.item.label || '').toString();
+            const bLabel = (b.item.label || '').toString();
+            if (collator) {
+                return collator.compare(aLabel, bLabel);
+            }
+            return aLabel.localeCompare(bLabel);
+        })
+        .map(({ item }) => item);
 
     const idealRowHeight = usableHeight / Math.max(sortedItems.length, 1);
     let rowHeight = Math.min(Math.max(idealRowHeight, 6), 14);
@@ -2566,11 +2580,11 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
         const itemCenter = getItemCenterInMeters(item);
         const itemCenterX = offsetX + (itemCenter.x - safeBounds.minX) * scale;
         const itemCenterY = offsetY + (itemCenter.y - safeBounds.minY) * scale;
-        doc.setDrawColor(59, 130, 246);
-        doc.setFillColor(59, 130, 246);
+        doc.setDrawColor(15, 23, 42);
+        doc.setFillColor(255, 255, 255);
         doc.setLineWidth(0.4);
-        doc.circle(calloutX, rowCenterY, 1.4, 'F');
-        doc.circle(itemCenterX, itemCenterY, 1.4, 'F');
+        doc.circle(calloutX, rowCenterY, 1.6, 'FD');
+        doc.circle(itemCenterX, itemCenterY, 1.6, 'FD');
         doc.line(calloutX, rowCenterY, itemCenterX, itemCenterY);
     });
 }
