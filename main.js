@@ -2488,7 +2488,7 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
     const headerHeight = 6;
     const drawingTop = headerY + headerHeight;
     const calloutGap = 8;
-    const calloutColumnWidth = 64;
+    const calloutColumnWidth = 38.4;
     const usableHeight = pageHeight - drawingTop - margin;
     const deckWidth = Math.max(safeBounds.width, 0.5);
     const deckHeight = Math.max(safeBounds.height, 0.5);
@@ -2726,6 +2726,7 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
             const itemCenter = getItemCenterInMeters(item);
             const itemCenterX = chosenLayout.offsetX + (itemCenter.x - safeBounds.minX) * chosenLayout.scale;
             const itemCenterY = chosenLayout.offsetY + (itemCenter.y - safeBounds.minY) * chosenLayout.scale;
+            const anchorY = Math.min(Math.max(itemCenterY, rowTop + 2), rowTop + column.rowHeight - 2);
             const calloutAnchorX = column.side === 'bottom'
                 ? column.x + column.width / 2
                 : column.side === 'right'
@@ -2734,9 +2735,9 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
             doc.setDrawColor(15, 23, 42);
             doc.setFillColor(255, 255, 255);
             doc.setLineWidth(0.4);
-            doc.circle(calloutAnchorX, rowCenterY, 1.6, 'FD');
+            doc.circle(calloutAnchorX, anchorY, 1.6, 'FD');
             doc.circle(itemCenterX, itemCenterY, 1.6, 'FD');
-            doc.line(calloutAnchorX, rowCenterY, itemCenterX, itemCenterY);
+            doc.line(calloutAnchorX, anchorY, itemCenterX, itemCenterY);
         });
     });
 }
