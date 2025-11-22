@@ -795,7 +795,7 @@ async function handlePrintToPdf() {
             const groupBounds = buildDeckAreaGroupBounds(groupEntries);
             const orientation = determineDeckPageOrientation(groupBounds);
             doc.addPage('a4', orientation);
-            renderDeckOnPdf(doc, currentDeck, groupEntries, {
+            renderDeckAreaCalloutPage(doc, currentDeck, groupEntries, {
                 bounds: groupBounds,
                 orientation,
                 title: buildDeckAreaGroupTitle(currentDeck?.name, group),
@@ -2364,6 +2364,74 @@ function drawDeckPdfBanner(doc, { deckName, timestamp, orientation } = {}) {
     return bannerHeight;
 }
 
+function drawDeckEntriesOnPdf(
+    doc,
+    sortedEntries,
+    bounds,
+    { scale, offsetX, offsetY, hideItemLabels = false } = {}
+) {
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    const safeOffsetX = Number.isFinite(offsetX) ? offsetX : 0;
+    const safeOffsetY = Number.isFinite(offsetY) ? offsetY : 0;
+    const safeBounds = bounds || getDeckBounds(sortedEntries);
+    sortedEntries.forEach((entry) => {
+        const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
+        const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
+        const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
+        const heightMeters = Number(entry.height) || DEFAULT_ITEM_HEIGHT_METERS;
+        const x = safeOffsetX + (xMeters - safeBounds.minX) * safeScale;
+        const y = safeOffsetY + (yMeters - safeBounds.minY) * safeScale;
+        const width = widthMeters * safeScale;
+        const height = heightMeters * safeScale;
+        const label = entry.label || (entry.type === 'deck-area' ? 'Deck area' : 'Item');
+        const rotationDegrees = normalizeRotationDegrees(entry.rotation);
+        const hasRotation = Math.abs(rotationDegrees) > 0.01;
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        if (entry.type === 'deck-area') {
+            doc.setFont('helvetica', 'normal');
+            doc.setFillColor(241, 245, 249);
+            doc.setDrawColor(15, 23, 42);
+            drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
+            doc.setTextColor(15, 23, 42);
+            const deckTextLayout = fitTextWithinRect(doc, label, width, height, {
+                maxFontSize: 11,
+                minFontSize: 6,
+            });
+            doc.setFontSize(deckTextLayout.fontSize);
+            const deckLines = deckTextLayout.lines.length ? deckTextLayout.lines : [''];
+            if (hasRotation) {
+                drawRotatedTextBlock(doc, deckLines, centerX, centerY, rotationDegrees, {
+                    fontSize: deckTextLayout.fontSize,
+                    lineHeight: deckTextLayout.lineHeight,
+                });
+            } else {
+                doc.text(deckLines, centerX, centerY, { align: 'center', baseline: 'middle' });
+            }
+        } else {
+            const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
+            doc.setFillColor(r, g, b);
+            doc.setDrawColor(15, 23, 42);
+            drawItemShape(doc, entry.shape, x, y, width, height, rotationDegrees, 'FD');
+            if (!hideItemLabels) {
+                doc.setFont('helvetica', 'bold');
+                const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
+                doc.setTextColor(textColor, textColor, textColor);
+                const itemTextLayout = buildItemLabelLayout(doc, label, width, height, entry.shape, safeScale);
+                doc.setFontSize(itemTextLayout.fontSize);
+                const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
+                drawRotatedTextBlock(doc, itemText, centerX, centerY, rotationDegrees, {
+                    fontSize: itemTextLayout.fontSize,
+                    lineHeight: itemTextLayout.lineHeight,
+                });
+            }
+        }
+    });
+
+    const deckAreas = sortedEntries.filter((entry) => entry.type === 'deck-area');
+    drawDeckAreaConnections(doc, deckAreas, safeBounds, safeScale, safeOffsetX, safeOffsetY);
+}
+
 function renderDeckOnPdf(
     doc,
     deck,
@@ -2402,62 +2470,109 @@ function renderDeckOnPdf(
         return;
     }
 
-    sortedEntries.forEach((entry) => {
-        const xMeters = (Number(entry.x) || 0) / PIXELS_PER_METER;
-        const yMeters = (Number(entry.y) || 0) / PIXELS_PER_METER;
-        const widthMeters = Number(entry.width) || DEFAULT_ITEM_WIDTH_METERS;
-        const heightMeters = Number(entry.height) || DEFAULT_ITEM_HEIGHT_METERS;
-        const x = offsetX + (xMeters - safeBounds.minX) * scale;
-        const y = offsetY + (yMeters - safeBounds.minY) * scale;
-        const width = widthMeters * scale;
-        const height = heightMeters * scale;
-        const label = entry.label || (entry.type === 'deck-area' ? 'Deck area' : 'Item');
-        const rotationDegrees = normalizeRotationDegrees(entry.rotation);
-        const hasRotation = Math.abs(rotationDegrees) > 0.01;
-        const centerX = x + width / 2;
-        const centerY = y + height / 2;
-        if (entry.type === 'deck-area') {
-            doc.setFont('helvetica', 'normal');
-            doc.setFillColor(241, 245, 249);
-            doc.setDrawColor(15, 23, 42);
-            drawRotatedRect(doc, x, y, width, height, rotationDegrees, 'FD');
-            doc.setTextColor(15, 23, 42);
-            const deckTextLayout = fitTextWithinRect(doc, label, width, height, {
-                maxFontSize: 11,
-                minFontSize: 6,
-            });
-            doc.setFontSize(deckTextLayout.fontSize);
-            const deckLines = deckTextLayout.lines.length ? deckTextLayout.lines : [''];
-            if (hasRotation) {
-                drawRotatedTextBlock(doc, deckLines, centerX, centerY, rotationDegrees, {
-                    fontSize: deckTextLayout.fontSize,
-                    lineHeight: deckTextLayout.lineHeight,
-                });
-            } else {
-                doc.text(deckLines, centerX, centerY, { align: 'center', baseline: 'middle' });
-            }
-        } else {
-            const { r, g, b } = hexToRgb(entry.color || '#3a7afe');
-            doc.setFillColor(r, g, b);
-            doc.setDrawColor(15, 23, 42);
-            drawItemShape(doc, entry.shape, x, y, width, height, rotationDegrees, 'FD');
-            if (!hideItemLabels) {
-                doc.setFont('helvetica', 'bold');
-                const textColor = isColorDark(entry.color || '#3a7afe') ? 255 : 15;
-                doc.setTextColor(textColor, textColor, textColor);
-                const itemTextLayout = buildItemLabelLayout(doc, label, width, height, entry.shape, scale);
-                doc.setFontSize(itemTextLayout.fontSize);
-                const itemText = itemTextLayout.lines.length ? itemTextLayout.lines : [''];
-                drawRotatedTextBlock(doc, itemText, centerX, centerY, rotationDegrees, {
-                    fontSize: itemTextLayout.fontSize,
-                    lineHeight: itemTextLayout.lineHeight,
-                });
-            }
-        }
+    drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
+        scale,
+        offsetX,
+        offsetY,
+        hideItemLabels,
+    });
+}
+
+function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, title } = {}) {
+    const deckName = deck?.name || 'Deck';
+    const safeBounds = bounds || getDeckBounds(entries);
+    const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
+    const { width: pageWidth, height: pageHeight } = getA4Dimensions(pageOrientation);
+    const margin = 12;
+    const headerY = margin;
+    const headerHeight = 6;
+    const drawingTop = headerY + headerHeight;
+    const calloutGap = 8;
+    const calloutColumnWidth = 64;
+    const usableHeight = pageHeight - drawingTop - margin;
+    const deckWidth = Math.max(safeBounds.width, 0.5);
+    const deckHeight = Math.max(safeBounds.height, 0.5);
+    const maxDeckWidth = pageWidth - margin * 2 - calloutColumnWidth - calloutGap;
+    const maxDeckHeight = usableHeight;
+    const scale = Math.min(maxDeckWidth / deckWidth, maxDeckHeight / deckHeight);
+    const offsetX = margin;
+    const offsetY = drawingTop;
+    const calloutX = offsetX + deckWidth * scale + calloutGap;
+    const calloutWidth = Math.max(pageWidth - margin - calloutX, calloutColumnWidth);
+    const pageTitle = typeof title === 'string' && title.trim() ? title.trim() : deckName;
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42);
+    doc.text(pageTitle, margin, headerY);
+
+    const sortedEntries = sortEntriesForPdf(entries);
+    if (!sortedEntries.length) {
+        doc.setFontSize(12);
+        doc.text('No layout data for this deck yet.', margin, headerY + 8);
+        return;
+    }
+
+    drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
+        scale,
+        offsetX,
+        offsetY,
+        hideItemLabels: true,
     });
 
-    const deckAreas = sortedEntries.filter((entry) => entry.type === 'deck-area');
-    drawDeckAreaConnections(doc, deckAreas, safeBounds, scale, offsetX, offsetY);
+    const itemEntries = sortedEntries.filter((entry) => entry.type === 'item');
+    if (!itemEntries.length) {
+        return;
+    }
+
+    const collator = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
+    const sortedItems = itemEntries.slice().sort((a, b) => {
+        const aLabel = (a.label || '').toString();
+        const bLabel = (b.label || '').toString();
+        if (collator) {
+            return collator.compare(aLabel, bLabel);
+        }
+        return aLabel.localeCompare(bLabel);
+    });
+
+    const idealRowHeight = usableHeight / Math.max(sortedItems.length, 1);
+    let rowHeight = Math.min(Math.max(idealRowHeight, 6), 14);
+    if (rowHeight * sortedItems.length > usableHeight) {
+        rowHeight = Math.max(usableHeight / sortedItems.length, 4);
+    }
+    const totalRowsHeight = rowHeight * sortedItems.length;
+    const columnTop = totalRowsHeight < usableHeight ? drawingTop + (usableHeight - totalRowsHeight) / 2 : drawingTop;
+    const labelMargin = 6;
+
+    doc.setFontSize(11);
+    doc.text('Items', calloutX, columnTop - 4);
+
+    sortedItems.forEach((item, index) => {
+        const rowTop = columnTop + rowHeight * index;
+        const rowCenterY = rowTop + rowHeight / 2;
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(226, 232, 240);
+        doc.rect(calloutX, rowTop, calloutWidth, rowHeight, 'FD');
+
+        const label = item.label || 'Item';
+        const lines = doc.splitTextToSize(label, calloutWidth - labelMargin * 2);
+        const textLineHeight = Math.min(rowHeight / Math.max(lines.length, 1), 4.5);
+        const textBlockHeight = lines.length * textLineHeight;
+        const textStartY = rowCenterY - textBlockHeight / 2 + textLineHeight / 2;
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(10);
+        lines.forEach((line, lineIndex) => {
+            doc.text(line, calloutX + labelMargin, textStartY + lineIndex * textLineHeight, { baseline: 'middle' });
+        });
+
+        const itemCenter = getItemCenterInMeters(item);
+        const itemCenterX = offsetX + (itemCenter.x - safeBounds.minX) * scale;
+        const itemCenterY = offsetY + (itemCenter.y - safeBounds.minY) * scale;
+        doc.setDrawColor(59, 130, 246);
+        doc.setFillColor(59, 130, 246);
+        doc.setLineWidth(0.4);
+        doc.circle(calloutX, rowCenterY, 1.4, 'F');
+        doc.circle(itemCenterX, itemCenterY, 1.4, 'F');
+        doc.line(calloutX, rowCenterY, itemCenterX, itemCenterY);
+    });
 }
 
 function renderItemsSummaryTable(doc, rows, shouldStartOnNewPage) {
