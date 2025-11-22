@@ -786,27 +786,19 @@ async function handlePrintToPdf() {
         });
 
         const deckAreas = entries.filter((entry) => entry.type === 'deck-area');
-        const collator = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
-        const sortedDeckAreas = deckAreas.slice().sort((a, b) => {
-            const labelA = typeof a.label === 'string' && a.label.trim() ? a.label.trim() : 'Deck area';
-            const labelB = typeof b.label === 'string' && b.label.trim() ? b.label.trim() : 'Deck area';
-            if (collator) {
-                return collator.compare(labelA, labelB);
-            }
-            return labelA.localeCompare(labelB);
-        });
-
-        sortedDeckAreas.forEach((deckArea) => {
-            const areaEntries = buildDeckAreaGroupEntries([deckArea], entries);
-            if (!areaEntries.length) {
+        const deckAreaGroups = sortDeckAreaGroupsAlphabetically(groupDeckAreasForPrint(deckAreas));
+        deckAreaGroups.forEach((group) => {
+            const groupEntries = buildDeckAreaGroupEntries(group, entries);
+            if (!groupEntries.length) {
                 return;
             }
-            const areaBounds = buildDeckAreaGroupBounds(areaEntries, 0.5);
-            const orientation = determineDeckPageOrientation(areaBounds);
+            const groupBounds = buildDeckAreaGroupBounds(groupEntries);
+            const orientation = determineDeckPageOrientation(groupBounds);
             doc.addPage('a4', orientation);
-            renderDeckAreaSnapshotPage(doc, currentDeck, deckArea, areaEntries, {
-                bounds: areaBounds,
+            renderDeckAreaCalloutPage(doc, currentDeck, groupEntries, {
+                bounds: groupBounds,
                 orientation,
+                title: buildDeckAreaGroupTitle(currentDeck?.name, group),
             });
         });
 
@@ -2594,39 +2586,6 @@ function renderDeckAreaCalloutPage(doc, deck, entries, { bounds, orientation, ti
         doc.circle(calloutX, rowCenterY, 1.6, 'FD');
         doc.circle(itemCenterX, itemCenterY, 1.6, 'FD');
         doc.line(calloutX, rowCenterY, itemCenterX, itemCenterY);
-    });
-}
-
-function renderDeckAreaSnapshotPage(doc, deck, deckArea, entries, { bounds, orientation } = {}) {
-    const safeDeck = deck?.name || 'Deck';
-    const safeAreaLabel = typeof deckArea?.label === 'string' && deckArea.label.trim()
-        ? deckArea.label.trim()
-        : 'Deck area';
-    const safeBounds = bounds || buildDeckAreaGroupBounds(entries || [], 0.25);
-    const pageOrientation = orientation || determineDeckPageOrientation(safeBounds);
-    const { width: pageWidth, height: pageHeight } = getA4Dimensions(pageOrientation);
-    const margin = 12;
-    const headerHeight = 8;
-    const drawingWidth = pageWidth - margin * 2;
-    const drawingHeight = pageHeight - margin * 2 - headerHeight;
-    const scale = Math.min(drawingWidth / safeBounds.width, drawingHeight / safeBounds.height);
-    const offsetX = margin;
-    const offsetY = margin + headerHeight;
-    const pageTitle = `${safeDeck} – ${safeAreaLabel}`;
-
-    doc.setTextColor(15, 23, 42);
-    doc.setFontSize(16);
-    doc.text(pageTitle, margin, margin + 2);
-
-    doc.setFillColor(241, 245, 249);
-    doc.rect(offsetX, offsetY, safeBounds.width * scale, safeBounds.height * scale, 'F');
-
-    const sortedEntries = sortEntriesForPdf(Array.isArray(entries) ? entries : []);
-    drawDeckEntriesOnPdf(doc, sortedEntries, safeBounds, {
-        scale,
-        offsetX,
-        offsetY,
-        hideItemLabels: false,
     });
 }
 
